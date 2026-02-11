@@ -11,6 +11,91 @@ function createMessageHandler(io, socket, state) {
   const { users, rooms, socketToRooms } = state;
 
   /**
+   * Screenshot detection notification
+   */
+  socket.on('screenshot-detected', ({ roomId }) => {
+    const user = users.get(socket.id);
+    if (!user) return;
+
+    // Verify user is in the room
+    if (!db.isRoomMember(roomId, user.username)) return;
+
+    // Broadcast warning to all room members
+    io.to(roomId).emit('screenshot-warning', { 
+      username: user.username,
+      timestamp: Date.now()
+    });
+
+    logger.debug('Screenshot detected', { roomId, username: user.username });
+  });
+
+  /**
+   * Delete message for everyone
+   */
+  socket.on('delete-message-everyone', ({ roomId, messageId }) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      socket.emit('error', { message: 'Not registered' });
+      return;
+    }
+
+    // Check room and membership
+    const dbRoom = db.getRoomById(roomId);
+    if (!dbRoom) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    if (!db.isRoomMember(roomId, user.username)) {
+      socket.emit('error', { message: 'Cannot delete message' });
+      return;
+    }
+
+    // Delete from database
+    const result = db.deleteMessage(messageId, roomId);
+    
+    if (result.changes > 0) {
+      // Broadcast deletion to all room members
+      io.to(roomId).emit('message-deleted', { 
+        messageId,
+        deletedBy: user.username,
+        mode: 'everyone'
+      });
+      
+      logger.debug('Message deleted for everyone', { roomId, messageId, deletedBy: user.username });
+    } else {
+      socket.emit('error', { message: 'Message not found or already deleted' });
+    }
+  });
+
+  /**
+   * Delete message for me only
+   */
+  socket.on('delete-message-me', ({ roomId, messageId }) => {
+    const user = users.get(socket.id);
+    if (!user) {
+      socket.emit('error', { message: 'Not registered' });
+      return;
+    }
+
+    // Check room and membership
+    if (!db.isRoomMember(roomId, user.username)) {
+      socket.emit('error', { message: 'Cannot delete message' });
+      return;
+    }
+
+    // Just notify the sender that message is deleted for them
+    // (Client-side only deletion, no server storage change needed)
+    socket.emit('message-deleted', { 
+      messageId,
+      deletedBy: user.username,
+      mode: 'me'
+    });
+
+    logger.debug('Message deleted for me', { roomId, messageId, username: user.username });
+  });
+
+  /**
    * Send encrypted message
    */
   socket.on('send-encrypted-message', ({ roomId, encryptedData, iv, senderUsername, attachmentId }) => {

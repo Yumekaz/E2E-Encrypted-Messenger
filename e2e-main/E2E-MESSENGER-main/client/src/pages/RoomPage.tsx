@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, FormEvent } from 'react';
+import React, { useState, useEffect, useRef, FormEvent, useCallback } from 'react';
 import socket from '../socket';
 import { QRCodeCanvas } from 'qrcode.react';
 import ConfirmModal from '../components/ConfirmModal';
@@ -47,11 +47,187 @@ function RoomPage({
   const [fingerprint, setFingerprint] = useState<string>('');
   const [serverUrl, setServerUrl] = useState<string>('');
   const [uploadingFile, setUploadingFile] = useState<boolean>(false);
+  const [isBlurred, setIsBlurred] = useState<boolean>(false);
+  const [screenshotWarning, setScreenshotWarning] = useState<string | null>(null);
+  const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
+  const [showDeleteMenu, setShowDeleteMenu] = useState<string | null>(null);
+  const [deletedMessageIds, setDeletedMessageIds] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const prevMessagesLengthRef = useRef<number>(0);
   const userHasScrolledRef = useRef<boolean>(false);
+  const screenshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const deleteMenuRef = useRef<HTMLDivElement>(null);
+
+  // ==================== SCREENSHOT DETECTION ====================
+  
+  // Detect screenshot via Visibility API and keyboard shortcuts
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // Detect when user switches tabs or minimizes
+      if (document.hidden) {
+        // User left the tab - could be taking a screenshot
+        // We don't alert on tab switch, only on actual screenshot detection
+      }
+    };
+
+    // Detect common screenshot keyboard shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Print Screen key
+      if (e.key === 'PrintScreen') {
+        notifyScreenshot();
+        return;
+      }
+      
+      // Windows + Shift + S (Snipping Tool)
+      // Ctrl + Shift + S (Some screenshot tools)
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        // Small delay to let the screenshot tool open
+        setTimeout(() => notifyScreenshot(), 500);
+        return;
+      }
+      
+      // Mac screenshot shortcuts: Cmd + Shift + 3/4/5
+      if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
+        setTimeout(() => notifyScreenshot(), 500);
+        return;
+      }
+    };
+
+    // Detect when window loses focus (could be screenshot tool)
+    const handleBlur = () => {
+      // Small delay to check if it's a screenshot
+      setTimeout(() => {
+        if (document.hidden) {
+          // Tab switch, not screenshot
+        }
+      }, 100);
+    };
+
+    const notifyScreenshot = () => {
+      socket.emit('screenshot-detected', { roomId });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [roomId]);
+
+  // Listen for screenshot warnings from other users
+  useEffect(() => {
+    socket.on('screenshot-warning', ({ username: detectedUser, timestamp }) => {
+      const warning = `⚠️ ${detectedUser} took a screenshot`;
+      setScreenshotWarning(warning);
+      
+      // Auto-hide after 5 seconds
+      if (screenshotTimeoutRef.current) {
+        clearTimeout(screenshotTimeoutRef.current);
+      }
+      screenshotTimeoutRef.current = setTimeout(() => {
+        setScreenshotWarning(null);
+      }, 5000);
+    });
+
+    return () => {
+      socket.off('screenshot-warning');
+    };
+  }, []);
+
+  // ==================== BLUR ON UNFOCUS ====================
+  
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsBlurred(true);
+      } else {
+        // Small delay to allow user to see the blur effect before unblurring
+        setTimeout(() => setIsBlurred(false), 300);
+      }
+    };
+
+    // Also blur when window loses focus
+    const handleWindowBlur = () => {
+      setIsBlurred(true);
+    };
+
+    const handleWindowFocus = () => {
+      setTimeout(() => setIsBlurred(false), 300);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, []);
+
+  // ==================== MESSAGE DELETION ====================
+  
+  const handleDeleteForEveryone = useCallback((messageId: string) => {
+    socket.emit('delete-message-everyone', { roomId, messageId });
+    setShowDeleteMenu(null);
+  }, [roomId]);
+
+  const handleDeleteForMe = useCallback((messageId: string) => {
+    socket.emit('delete-message-me', { roomId, messageId });
+    setDeletedMessageIds(prev => new Set(prev).add(messageId));
+    setShowDeleteMenu(null);
+  }, [roomId]);
+
+  // Listen for message deletions
+  useEffect(() => {
+    socket.on('message-deleted', ({ messageId, deletedBy, mode }) => {
+      if (mode === 'everyone') {
+        // Remove the message for everyone
+        setMessages(prev => prev.filter(msg => (msg as DecryptedMessage).id !== messageId));
+        
+        // Add system message about deletion
+        setMessages(prev => [...prev, {
+          type: 'system',
+          text: `🗑️ ${deletedBy} deleted a message`,
+          timestamp: Date.now()
+        } as SystemMessage]);
+      } else if (mode === 'me' && deletedBy === username) {
+        // Only delete for current user
+        setDeletedMessageIds(prev => new Set(prev).add(messageId));
+      }
+    });
+
+    return () => {
+      socket.off('message-deleted');
+    };
+  }, [username]);
+
+  // Close delete menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (deleteMenuRef.current && !deleteMenuRef.current.contains(event.target as Node)) {
+        setShowDeleteMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Handle message context menu (right-click)
+  const handleMessageContextMenu = (e: React.MouseEvent, messageId: string, senderUsername: string) => {
+    e.preventDefault();
+    setShowDeleteMenu(messageId);
+  };
 
   // Decrypt an attachment and return a blob URL
   const decryptAttachment = async (attachment: EncryptedAttachmentData): Promise<string | null> => {
@@ -484,36 +660,71 @@ function RoomPage({
               <span>Messages and files are end-to-end encrypted</span>
             </div>
 
-            {messages.map((msg, index) => (
-              <div
-                key={(msg as DecryptedMessage).id || index}
-                className={`message ${isSystemMessage(msg)
-                  ? 'system-message'
-                  : (msg as DecryptedMessage).senderUsername === username
-                    ? 'own-message'
-                    : 'other-message'
-                  }`}
-              >
-                {!isSystemMessage(msg) && (
-                  <div className="message-header">
-                    <span className="message-username">{(msg as DecryptedMessage).senderUsername}</span>
-                    <span className="message-time">{formatTime(msg.timestamp)}</span>
-                  </div>
-                )}
-                <div className="message-content">
-                  <div className="message-text">{isSystemMessage(msg) ? msg.text : (msg as DecryptedMessage).text}</div>
-                  {!isSystemMessage(msg) && (msg as MessageWithAttachment).attachment && (
-                    <MessageAttachment
-                      key={(msg as MessageWithAttachment).attachment!.id || (msg as MessageWithAttachment).attachment!.filename}
-                      attachment={(msg as MessageWithAttachment).attachment!}
-                    />
+            {messages.map((msg, index) => {
+              const msgId = (msg as DecryptedMessage).id;
+              const isDeleted = deletedMessageIds.has(msgId);
+              
+              if (isDeleted && !isSystemMessage(msg)) {
+                return null;
+              }
+              
+              return (
+                <div
+                  key={msgId || index}
+                  className={`message ${isSystemMessage(msg)
+                    ? 'system-message'
+                    : (msg as DecryptedMessage).senderUsername === username
+                      ? 'own-message'
+                      : 'other-message'
+                    }`}
+                  onContextMenu={(e) => !isSystemMessage(msg) && handleMessageContextMenu(e, msgId, (msg as DecryptedMessage).senderUsername)}
+                  style={{ position: 'relative' }}
+                >
+                  {!isSystemMessage(msg) && (
+                    <div className="message-header">
+                      <span className="message-username">{(msg as DecryptedMessage).senderUsername}</span>
+                      <span className="message-time">{formatTime(msg.timestamp)}</span>
+                    </div>
                   )}
-                  {!isSystemMessage(msg) && (msg as DecryptedMessage).decrypted && (
-                    <span className="encrypted-badge" title="Decrypted successfully">🔓</span>
+                  <div className="message-content">
+                    <div className="message-text">{isSystemMessage(msg) ? msg.text : (msg as DecryptedMessage).text}</div>
+                    {!isSystemMessage(msg) && (msg as MessageWithAttachment).attachment && (
+                      <MessageAttachment
+                        key={(msg as MessageWithAttachment).attachment!.id || (msg as MessageWithAttachment).attachment!.filename}
+                        attachment={(msg as MessageWithAttachment).attachment!}
+                      />
+                    )}
+                    {!isSystemMessage(msg) && (msg as DecryptedMessage).decrypted && (
+                      <span className="encrypted-badge" title="Decrypted successfully">🔓</span>
+                    )}
+                  </div>
+                  
+                  {/* Delete Menu */}
+                  {showDeleteMenu === msgId && (
+                    <div ref={deleteMenuRef} className="delete-menu">
+                      <button 
+                        className="delete-menu-item delete-for-everyone"
+                        onClick={() => handleDeleteForEveryone(msgId)}
+                      >
+                        🗑️ Delete for everyone
+                      </button>
+                      <button 
+                        className="delete-menu-item delete-for-me"
+                        onClick={() => handleDeleteForMe(msgId)}
+                      >
+                        🗑️ Delete for me
+                      </button>
+                      <button 
+                        className="delete-menu-item cancel"
+                        onClick={() => setShowDeleteMenu(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
 
             {typingUsers.size > 0 && (
@@ -596,6 +807,25 @@ function RoomPage({
         cancelText="Cancel"
         isDanger={isOwner}
       />
+
+      {/* Blur Overlay */}
+      {isBlurred && (
+        <div className="blur-overlay">
+          <div className="blur-content">
+            <div className="blur-icon">🔒</div>
+            <div className="blur-text">Screen hidden for privacy</div>
+            <div className="blur-subtext">Click anywhere to reveal</div>
+          </div>
+        </div>
+      )}
+
+      {/* Screenshot Warning Toast */}
+      {screenshotWarning && (
+        <div className="screenshot-warning-toast">
+          <span className="warning-icon">⚠️</span>
+          <span className="warning-text">{screenshotWarning}</span>
+        </div>
+      )}
     </div>
   );
 }

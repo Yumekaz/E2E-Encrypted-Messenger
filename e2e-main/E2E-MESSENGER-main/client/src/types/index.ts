@@ -152,6 +152,11 @@ export interface SocketEvents {
   }) => void;
   typing: (data: { roomId: string }) => void;
   'request-upload-token': () => void;
+  // Screenshot detection
+  'screenshot-detected': (data: { roomId: string }) => void;
+  // Message deletion
+  'delete-message-everyone': (data: { roomId: string; messageId: string }) => void;
+  'delete-message-me': (data: { roomId: string; messageId: string }) => void;
 
   // Server -> Client
   registered: (data: { username: string }) => void;
@@ -179,6 +184,10 @@ export interface SocketEvents {
   }) => void;
   'room-closed': () => void;
   'user-typing': (data: { username: string }) => void;
+  // Screenshot warning
+  'screenshot-warning': (data: { username: string; timestamp: number }) => void;
+  // Message deletion
+  'message-deleted': (data: { messageId: string; deletedBy: string; mode: 'everyone' | 'me' }) => void;
   error: (data: { message: string }) => void;
 }
 

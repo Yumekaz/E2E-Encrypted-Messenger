@@ -376,6 +376,43 @@ function storeMessage(messageId, roomId, senderId, senderUsername, encryptedData
   );
 }
 
+function deleteMessage(messageId, roomId) {
+  // First delete any associated attachment
+  const message = getOne(
+    'SELECT attachment_id FROM messages WHERE message_id = ? AND room_id = ?',
+    [messageId, roomId]
+  );
+  
+  if (message?.attachment_id) {
+    // Get attachment details for file deletion
+    const attachment = getAttachment(message.attachment_id);
+    if (attachment) {
+      // Delete the physical file if it exists
+      const fs = require('fs');
+      const path = require('path');
+      const config = require('../config');
+      const filePath = path.join(config.uploads.dir, attachment.filepath);
+      
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (err) {
+          logger.error('Failed to delete attachment file', { error: err.message, filePath });
+        }
+      }
+      
+      // Delete attachment record
+      runQuery('DELETE FROM attachments WHERE id = ?', [message.attachment_id]);
+    }
+  }
+  
+  // Delete the message
+  return runQuery(
+    'DELETE FROM messages WHERE message_id = ? AND room_id = ?',
+    [messageId, roomId]
+  );
+}
+
 function getRoomMessages(roomId, limit = 100) {
   return getAll(`
     SELECT m.message_id, m.room_id, m.sender_username, m.encrypted_data, m.iv, 
@@ -511,6 +548,7 @@ module.exports = {
   getRoomMessages,
   markMessageDelivered,
   markMessageRead,
+  deleteMessage,
 
   // Attachment operations
   createAttachment,
