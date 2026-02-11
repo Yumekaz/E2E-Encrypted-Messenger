@@ -6,7 +6,9 @@
 const db = require('../database/db');
 const logger = require('../utils/logger');
 const { authenticateSocket } = require('../middleware/auth');
+const config = require('../config');
 const authService = require('../services/authService');
+const { socketLimiter } = require('../middleware/rateLimiter');
 const createMessageHandler = require('./handlers/messageHandler');
 const createRoomHandler = require('./handlers/roomHandler');
 
@@ -33,6 +35,26 @@ function setupSocketHandlers(io) {
 
   io.on('connection', (socket) => {
     logger.debug('Socket connected', { socketId: socket.id });
+
+    socket.use((packet, next) => {
+      const event = packet[0] || 'unknown';
+      if (event === 'message-delivered' || event === 'message-read') {
+        return next();
+      }
+
+      const result = socketLimiter.check(
+        `${socket.id}:${event}`,
+        config.rateLimit.socketMaxEvents,
+        config.rateLimit.socketWindowMs
+      );
+
+      if (!result.allowed) {
+        socket.emit('error', { message: 'Rate limit exceeded. Please slow down.' });
+        return;
+      }
+
+      next();
+    });
 
     // Register user
     socket.on('register', ({ username, publicKey }) => {
@@ -117,28 +139,36 @@ function setupSocketHandlers(io) {
       // Leave all rooms
       const userRooms = state.socketToRooms.get(socket.id) || new Set();
       for (const roomId of userRooms) {
-        const room = state.rooms.get(roomId);
-        if (room) {
-          room.members.delete(user.username);
-          io.to(roomId).emit('member-left', { username: user.username });
+        const dbRoom = db.getRoomById(roomId);
+        if (!dbRoom) {
+          continue;
+        }
 
-          const memberKeys = {};
-          room.members.forEach((key, name) => {
-            memberKeys[name] = key;
-          });
+        db.removeRoomMember(roomId, user.username);
+        io.to(roomId).emit('member-left', { username: user.username });
 
-          io.to(roomId).emit('members-update', {
-            members: Array.from(room.members.keys()),
-            memberKeys,
-          });
+        const dbMembers = db.getRoomMembers(roomId);
+        const memberKeys = {};
+        const memberList = [];
 
-          // Close room if owner disconnects
-          if (room.ownerSocketId === socket.id) {
-            state.rooms.delete(roomId);
-            db.deleteRoom(roomId);
-            io.to(roomId).emit('room-closed');
-            logger.info('Room closed (owner disconnect)', { roomId });
+        for (const member of dbMembers) {
+          memberList.push(member.username);
+          const memberUser = db.getUserByUsername(member.username);
+          if (memberUser?.public_key) {
+            memberKeys[member.username] = memberUser.public_key;
           }
+        }
+
+        io.to(roomId).emit('members-update', {
+          members: memberList,
+          memberKeys,
+        });
+
+        if (dbRoom.owner_username === user.username) {
+          db.deleteRoom(roomId);
+          state.rooms.delete(roomId);
+          io.to(roomId).emit('room-closed');
+          logger.info('Room closed (owner disconnect)', { roomId });
         }
       }
 

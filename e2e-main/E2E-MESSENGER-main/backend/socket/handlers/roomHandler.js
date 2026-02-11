@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const db = require('../../database/db');
 const logger = require('../../utils/logger');
+const urlSigner = require('../../utils/urlSigner');
 
 function createRoomHandler(io, socket, state) {
   const { users, usernames, rooms, joinRequests, socketToRooms } = state;
@@ -58,10 +59,9 @@ function createRoomHandler(io, socket, state) {
    * Request to join room
    */
   socket.on('request-join', ({ roomCode }) => {
-    console.log('[DEBUG request-join] roomCode:', roomCode);
-
     const user = users.get(socket.id);
-    console.log('[DEBUG request-join] user:', user?.username || 'NOT FOUND');
+    
+    logger.debug('Join request received', { roomCode, socketId: socket.id });
 
     if (!user) {
       socket.emit('error', { message: 'Not registered' });
@@ -70,7 +70,7 @@ function createRoomHandler(io, socket, state) {
 
     // Look up room from DATABASE (not in-memory) for persistence
     const dbRoom = db.getRoomByCode(roomCode);
-    console.log('[DEBUG request-join] dbRoom:', dbRoom ? `found - owner: ${dbRoom.owner_username}` : 'NOT FOUND');
+    logger.debug('Room lookup result', { roomCode, found: !!dbRoom, owner: dbRoom?.owner_username });
 
     if (!dbRoom) {
       socket.emit('error', { message: 'Room not found' });
@@ -113,9 +113,8 @@ function createRoomHandler(io, socket, state) {
     });
 
     // Look up owner's current socket by username (not stale stored ID)
-    console.log('[DEBUG request-join] userToSocket keys:', Array.from(state.userToSocket.keys()));
     const ownerSocketId = state.userToSocket.get(dbRoom.owner_username);
-    console.log('[DEBUG request-join] ownerSocketId:', ownerSocketId || 'NOT FOUND');
+    logger.debug('Owner socket lookup', { owner: dbRoom.owner_username, online: !!ownerSocketId });
 
     logger.info('Join request received', {
       username: user.username,
@@ -132,11 +131,10 @@ function createRoomHandler(io, socket, state) {
         publicKey: user.publicKey,
         roomId: dbRoom.room_id,
       });
-      console.log('[DEBUG request-join] Emitted join-request to', ownerSocketId);
       logger.debug('Join request sent to owner', { ownerSocketId });
     } else {
       // Owner not online
-      console.log('[DEBUG request-join] Owner not online!');
+      logger.warn('Join request failed - owner offline', { roomCode, owner: dbRoom.owner_username });
       socket.emit('error', { message: 'Room owner is not online' });
       joinRequests.delete(requestId);
     }
@@ -283,10 +281,7 @@ function createRoomHandler(io, socket, state) {
 
     // Get messages from database
     const dbMessages = db.getRoomMessages(roomId);
-    console.log('Server loading messages from DB, count:', dbMessages.length);
-    if (dbMessages.length > 0) {
-      console.log('First message created_at:', dbMessages[0].created_at, 'type:', typeof dbMessages[0].created_at);
-    }
+    logger.debug('Loading room messages', { roomId, count: dbMessages.length });
     
     const encryptedMessages = dbMessages.map(msg => {
       // Parse SQLite datetime - it's stored as local time string 'YYYY-MM-DD HH:MM:SS'
@@ -298,8 +293,6 @@ function createRoomHandler(io, socket, state) {
       } else {
         timestamp = new Date(createdAt).getTime();
       }
-      
-      console.log('DB created_at:', createdAt, '-> timestamp:', timestamp, '-> Date:', new Date(timestamp).toString());
       
       const message = {
         id: msg.message_id,
@@ -325,7 +318,7 @@ function createRoomHandler(io, socket, state) {
         message.attachment = {
           id: msg.attachment_id,
           filename: msg.filename,
-          url: `/api/files/${msg.attachment_id}`, // Use API route for retrieval
+          url: urlSigner.sign(`/api/files/${msg.attachment_id}`),
           // Use original type, or inferred type, or stored mimetype
           mimetype: msg.original_type || inferredMime || msg.mimetype,
           size: msg.size,

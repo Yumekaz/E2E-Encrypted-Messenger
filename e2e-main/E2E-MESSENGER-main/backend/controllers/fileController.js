@@ -8,6 +8,8 @@ const path = require('path');
 const config = require('../config');
 const fileService = require('../services/fileService');
 const roomService = require('../services/roomService');
+const urlSigner = require('../utils/urlSigner');
+const logger = require('../utils/logger');
 const { ValidationError, AuthorizationError, NotFoundError } = require('../utils/errors');
 
 class FileController {
@@ -16,56 +18,53 @@ class FileController {
    * Upload a file (plain or encrypted)
    */
   async upload(req, res, next) {
-    // Use multer middleware
-    fileService.getUploadMiddleware()(req, res, async (err) => {
-      if (err) {
-        return next(err);
-      }
-
-      try {
-        if (!req.file) {
-          throw new ValidationError('No file uploaded');
-        }
-
-        const { roomId, encrypted, iv, metadata, originalName, originalType, originalSize } = req.body;
-
-        if (!roomId) {
-          throw new ValidationError('Room ID is required');
-        }
-
-        // Verify user is a room member
-        if (!roomService.isMember(roomId, req.user.username)) {
-          throw new AuthorizationError('Not a room member');
-        }
-
-        // Save file metadata with encryption info
-        const attachment = fileService.saveFileMetadata(
-          roomId,
-          req.user.userId,
-          req.user.username,
-          req.file,
-          {
-            encrypted: encrypted === 'true',
-            iv: iv || null,
-            metadata: metadata || null,
-            originalName: originalName || null,
-            originalType: originalType || null,
-            originalSize: originalSize ? parseInt(originalSize) : null,
-          }
-        );
-
-        res.status(201).json({
-          message: 'File uploaded successfully',
-          attachment,
+    try {
+      await new Promise((resolve, reject) => {
+        fileService.getUploadMiddleware()(req, res, (err) => {
+          if (err) reject(err);
+          else resolve();
         });
-      } catch (error) {
-        // Clean up uploaded file if error occurs
-        if (req.file) {
-          fileService.deleteFile(req.file.filename);
-        }
-        next(error);
+      });
+
+      if (!req.file) {
+        throw new ValidationError('No file uploaded');
       }
-    });
+
+      const { roomId, encrypted, iv, metadata, originalName, originalType, originalSize } = req.body;
+
+      if (!roomId) {
+        throw new ValidationError('Room ID is required');
+      }
+
+      if (!roomService.isMember(roomId, req.user.username)) {
+        throw new AuthorizationError('Not a room member');
+      }
+
+      const attachment = fileService.saveFileMetadata(
+        roomId,
+        req.user.userId,
+        req.user.username,
+        req.file,
+        {
+          encrypted: encrypted === 'true',
+          iv: iv || null,
+          metadata: metadata || null,
+          originalName: originalName || null,
+          originalType: originalType || null,
+          originalSize: originalSize ? parseInt(originalSize, 10) : null,
+        }
+      );
+
+      res.status(201).json({
+        message: 'File uploaded successfully',
+        attachment,
+      });
+    } catch (error) {
+      if (req.file) {
+        fileService.deleteFile(req.file.filename);
+      }
+      next(error);
+    }
   }
 
   /**
@@ -75,11 +74,17 @@ class FileController {
   async getFile(req, res, next) {
     try {
       const { id } = req.params;
-      const attachment = fileService.getAttachment(parseInt(id));
+      const { sig, exp } = req.query;
+      const attachment = fileService.getAttachment(parseInt(id, 10));
+      const filePath = `/api/files/${attachment.id}`;
 
       // Verify user is a room member
       if (!roomService.isMember(attachment.room_id, req.user.username)) {
         throw new AuthorizationError('Not a room member');
+      }
+
+      if (!sig || !exp || !urlSigner.verify(filePath, String(sig), Number(exp))) {
+        throw new AuthorizationError('Invalid or expired file URL signature');
       }
 
       // Serve the specific file
@@ -98,15 +103,11 @@ class FileController {
 
       const stream = fs.createReadStream(absolutePath);
       stream.on('error', (err) => {
-        console.error('File stream error:', err);
-        try { fs.appendFileSync('debug_error.log', `STREAM ERROR: ${err.message}\n`); } catch (e) { }
+        logger.error('File stream error', { error: err.message, attachmentId: attachment.id });
         if (!res.headersSent) res.status(500).json({ message: 'Error streaming file' });
       });
       stream.pipe(res);
     } catch (error) {
-      try {
-        fs.appendFileSync('debug_error.log', `GETFILE ERROR: ${error.message}\n${error.stack}\n`);
-      } catch (e) { }
       next(error);
     }
   }
@@ -118,19 +119,22 @@ class FileController {
   async getRoomFiles(req, res, next) {
     try {
       const { roomId } = req.params;
+      const page = Math.max(parseInt(req.query.page, 10) || config.pagination.defaultPage, 1);
+      const rawPageSize = parseInt(req.query.pageSize || req.query.limit, 10) || config.pagination.defaultPageSize;
+      const pageSize = Math.min(Math.max(rawPageSize, 1), config.pagination.maxPageSize);
 
       // Verify user is a room member
       if (!roomService.isMember(roomId, req.user.username)) {
         throw new AuthorizationError('Not a room member');
       }
 
-      const attachments = fileService.getRoomAttachments(roomId);
+      const { attachments, pagination } = fileService.getRoomAttachmentsPage(roomId, page, pageSize);
 
       res.json({
         attachments: attachments.map(a => ({
           id: a.id,
           filename: a.encrypted ? a.original_name : a.filename,
-          url: `/api/files/${a.id}`,
+          url: urlSigner.sign(`/api/files/${a.id}`),
           mimetype: a.encrypted ? a.original_type : a.mimetype,
           size: a.encrypted ? a.original_size : a.size,
           uploadedBy: a.username,
@@ -140,6 +144,7 @@ class FileController {
           iv: a.iv || null,
           metadata: a.metadata || null,
         })),
+        pagination,
       });
     } catch (error) {
       next(error);

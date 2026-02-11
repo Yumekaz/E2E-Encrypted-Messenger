@@ -143,12 +143,12 @@ class RoomService {
   /**
    * Get room messages
    */
-  getMessages(roomId, username, limit = 100) {
+  getMessages(roomId, username, page = 1, pageSize = 25) {
     if (!db.isRoomMember(roomId, username)) {
       throw new AuthorizationError('Not a room member');
     }
 
-    return db.getRoomMessages(roomId, limit);
+    return db.getRoomMessagesPage(roomId, page, pageSize);
   }
 }
 

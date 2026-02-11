@@ -4,6 +4,8 @@
  */
 
 const roomService = require('../services/roomService');
+const config = require('../config');
+const urlSigner = require('../utils/urlSigner');
 
 class RoomController {
   /**
@@ -119,9 +121,11 @@ class RoomController {
   async getMessages(req, res, next) {
     try {
       const { roomId } = req.params;
-      const limit = parseInt(req.query.limit) || 100;
+      const page = Math.max(parseInt(req.query.page, 10) || config.pagination.defaultPage, 1);
+      const rawPageSize = parseInt(req.query.pageSize || req.query.limit, 10) || config.pagination.defaultPageSize;
+      const pageSize = Math.min(Math.max(rawPageSize, 1), config.pagination.maxPageSize);
 
-      const messages = roomService.getMessages(roomId, req.user.username, limit);
+      const { messages, pagination } = roomService.getMessages(roomId, req.user.username, page, pageSize);
 
       res.json({
         messages: messages.map(m => ({
@@ -134,11 +138,12 @@ class RoomController {
           attachment: m.attachment_id ? {
             id: m.attachment_id,
             filename: m.filename,
-            url: `/uploads/${m.filepath}`,
+            url: urlSigner.sign(`/api/files/${m.attachment_id}`),
             mimetype: m.mimetype,
             size: m.size,
           } : null,
         })),
+        pagination,
       });
     } catch (error) {
       next(error);

@@ -5,6 +5,11 @@
 
 require('dotenv').config();
 
+const { validateEnv } = require('./validateEnv');
+
+// Validate environment variables on load
+validateEnv();
+
 const config = {
   // Server
   env: process.env.NODE_ENV || 'development',
@@ -45,11 +50,38 @@ const config = {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000, // 15 minutes
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100,
     authMaxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 5,
+    socketWindowMs: parseInt(process.env.SOCKET_RATE_LIMIT_WINDOW_MS, 10) || 10 * 1000,
+    socketMaxEvents: parseInt(process.env.SOCKET_RATE_LIMIT_MAX_EVENTS, 10) || 80,
   },
 
   // Bcrypt
   bcrypt: {
     saltRounds: 12,
+  },
+
+  // Security
+  security: {
+    urlSigningSecret: process.env.URL_SIGNING_SECRET || null,
+    csp: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        connectSrc: ["'self'", 'ws:', 'wss:'],
+        fontSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+  },
+
+  // Pagination
+  pagination: {
+    defaultPage: parseInt(process.env.DEFAULT_PAGE, 10) || 1,
+    defaultPageSize: parseInt(process.env.DEFAULT_PAGE_SIZE, 10) || 25,
+    maxPageSize: parseInt(process.env.MAX_PAGE_SIZE, 10) || 100,
   },
 };
 

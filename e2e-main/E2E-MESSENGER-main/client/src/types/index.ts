@@ -283,13 +283,18 @@ export interface ApiError {
 }
 
 export interface HealthResponse {
-  status: 'healthy' | 'unhealthy';
+  status: 'healthy' | 'unhealthy' | 'degraded';
   timestamp: string;
   stats: {
     users: number;
     rooms: number;
     messages: number;
     attachments: number;
+  };
+  dependencies?: {
+    database: 'up' | 'down';
+    uploadStorage: 'up' | 'down';
+    environment: 'up' | 'down';
   };
 }
 

@@ -11,7 +11,6 @@ const { AppError } = require('../utils/errors');
  * Handle 404 Not Found
  */
 function notFoundHandler(req, res, next) {
-  try { require('fs').appendFileSync('debug_error.log', `404 NOT FOUND: ${req.method} ${req.originalUrl}\n`); } catch (e) { }
   res.status(404).json({
     error: 'Not Found',
     message: `Cannot ${req.method} ${req.originalUrl}`,
@@ -22,17 +21,10 @@ function notFoundHandler(req, res, next) {
  * Global error handler
  */
 function errorHandler(err, req, res, next) {
-  // Log error
-  const fs = require('fs');
-  try {
-    fs.appendFileSync('debug_error.log', `GLOBAL ERROR: ${req.method} ${req.originalUrl} - ${err.message}\nStack: ${err.stack}\n`);
-  } catch (e) { }
-
   logger.error(err.message, {
     stack: err.stack,
     url: req.originalUrl,
     method: req.method,
-    body: req.body,
     userId: req.user?.userId,
   });
 

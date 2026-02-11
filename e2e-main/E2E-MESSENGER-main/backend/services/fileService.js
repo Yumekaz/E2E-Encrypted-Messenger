@@ -10,6 +10,7 @@ const fs = require('fs');
 const config = require('../config');
 const db = require('../database/db');
 const logger = require('../utils/logger');
+const urlSigner = require('../utils/urlSigner');
 const { ValidationError, NotFoundError } = require('../utils/errors');
 
 class FileService {
@@ -110,7 +111,7 @@ class FileService {
     return {
       id: attachment.id,
       filename: encrypted ? originalName : attachment.filename,
-      url: `/api/files/${attachment.id}`,
+      url: urlSigner.sign(`/api/files/${attachment.id}`),
       mimetype: encrypted ? originalType : attachment.mimetype,
       size: encrypted ? originalSize : attachment.size,
       encrypted: encrypted || false,
@@ -137,6 +138,10 @@ class FileService {
    */
   getRoomAttachments(roomId) {
     return db.getRoomAttachments(roomId);
+  }
+
+  getRoomAttachmentsPage(roomId, page, pageSize) {
+    return db.getRoomAttachmentsPage(roomId, page, pageSize);
   }
 
   /**

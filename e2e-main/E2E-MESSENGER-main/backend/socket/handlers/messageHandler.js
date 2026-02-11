@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const db = require('../../database/db');
 const logger = require('../../utils/logger');
+const urlSigner = require('../../utils/urlSigner');
 
 function createMessageHandler(io, socket, state) {
   const { users, rooms, socketToRooms } = state;
@@ -14,21 +15,15 @@ function createMessageHandler(io, socket, state) {
    * Screenshot detection notification
    */
   socket.on('screenshot-detected', ({ roomId }) => {
-    console.log('screenshot-detected event received from socket:', socket.id, 'roomId:', roomId);
-    
     const user = users.get(socket.id);
     if (!user) {
-      console.log('No user found for socket:', socket.id);
       return;
     }
 
     // Verify user is in the room
     if (!db.isRoomMember(roomId, user.username)) {
-      console.log('User not in room:', user.username, roomId);
       return;
     }
-
-    console.log('Broadcasting screenshot-warning to room:', roomId, 'user:', user.username);
     
     // Broadcast warning to all room members
     io.to(roomId).emit('screenshot-warning', { 
@@ -150,7 +145,7 @@ function createMessageHandler(io, socket, state) {
         attachment = {
           id: dbAttachment.id,
           filename: dbAttachment.filename,
-          url: `/api/files/${dbAttachment.id}`,
+          url: urlSigner.sign(`/api/files/${dbAttachment.id}`),
           // Use original type, or inferred type, or stored mimetype
           mimetype: dbAttachment.original_type || inferredMime || dbAttachment.mimetype,
           size: dbAttachment.size,
@@ -170,8 +165,6 @@ function createMessageHandler(io, socket, state) {
       attachment
     };
     
-    console.log('Server sending message with timestamp:', timestamp, 'Date:', new Date(timestamp).toString());
-
     // Store in database
     db.storeMessage(
       messageId,

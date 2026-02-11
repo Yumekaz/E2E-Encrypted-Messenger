@@ -37,9 +37,10 @@ function MessageAttachment({ attachment }: MessageAttachmentProps): JSX.Element 
       if (!attachment.decryptedUrl) {
         URL.revokeObjectURL(blobUrl);
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Download failed:', error);
-      alert(`Download failed: ${error.message || 'Unknown error'}`);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Download failed: ${message}`);
     }
   };
 

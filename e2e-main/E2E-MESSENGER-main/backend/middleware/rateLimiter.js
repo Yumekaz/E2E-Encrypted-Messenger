@@ -75,6 +75,7 @@ class RateLimiter {
 }
 
 const limiter = new RateLimiter();
+const socketLimiter = new RateLimiter();
 
 /**
  * Create rate limiter middleware
@@ -126,4 +127,5 @@ module.exports = {
   createRateLimiter,
   authRateLimiter,
   apiRateLimiter,
+  socketLimiter,
 };

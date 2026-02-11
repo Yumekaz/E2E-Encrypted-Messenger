@@ -167,8 +167,24 @@ function runQuery(sql, params = []) {
     saveDatabase();
   }
 
-  console.log('[DB DEBUG] Run Query:', { sql: sql.substring(0, 50), params, lastId, changes });
+  logger.debug('DB Query executed', { sql: sql.substring(0, 50), params, lastId, changes });
   return { changes, lastInsertRowid: lastId };
+}
+
+function runInTransaction(operation) {
+  runQuery('BEGIN TRANSACTION');
+  try {
+    const result = operation();
+    runQuery('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      runQuery('ROLLBACK');
+    } catch (rollbackError) {
+      logger.error('Database rollback failed', { error: rollbackError.message });
+    }
+    throw error;
+  }
 }
 
 function getLastInsertRowId() {
@@ -294,14 +310,16 @@ function cleanupExpiredTokens() {
 // ==================== ROOM OPERATIONS ====================
 
 function createRoom(roomId, roomCode, ownerId, ownerUsername, roomType = 'legacy') {
-  runQuery(
-    `INSERT INTO rooms (room_id, room_code, owner_id, owner_username, room_type) VALUES (?, ?, ?, ?, ?)`,
-    [roomId, roomCode, ownerId, ownerUsername, roomType]
-  );
-  runQuery(
-    `INSERT INTO room_members (room_id, user_id, username) VALUES (?, ?, ?)`,
-    [roomId, ownerId, ownerUsername]
-  );
+  runInTransaction(() => {
+    runQuery(
+      `INSERT INTO rooms (room_id, room_code, owner_id, owner_username, room_type) VALUES (?, ?, ?, ?, ?)`,
+      [roomId, roomCode, ownerId, ownerUsername, roomType]
+    );
+    runQuery(
+      `INSERT INTO room_members (room_id, user_id, username) VALUES (?, ?, ?)`,
+      [roomId, ownerId, ownerUsername]
+    );
+  });
   return { roomId, roomCode, ownerId, ownerUsername, roomType };
 }
 
@@ -360,10 +378,12 @@ function getUserRooms(username) {
 }
 
 function deleteRoom(roomId) {
-  runQuery('DELETE FROM attachments WHERE room_id = ?', [roomId]);
-  runQuery('DELETE FROM messages WHERE room_id = ?', [roomId]);
-  runQuery('DELETE FROM room_members WHERE room_id = ?', [roomId]);
-  return runQuery('DELETE FROM rooms WHERE room_id = ?', [roomId]);
+  return runInTransaction(() => {
+    runQuery('DELETE FROM attachments WHERE room_id = ?', [roomId]);
+    runQuery('DELETE FROM messages WHERE room_id = ?', [roomId]);
+    runQuery('DELETE FROM room_members WHERE room_id = ?', [roomId]);
+    return runQuery('DELETE FROM rooms WHERE room_id = ?', [roomId]);
+  });
 }
 
 // ==================== MESSAGE OPERATIONS ====================
@@ -382,38 +402,32 @@ function deleteMessage(messageId, roomId) {
     'SELECT attachment_id FROM messages WHERE message_id = ? AND room_id = ?',
     [messageId, roomId]
   );
-  
-  if (message?.attachment_id) {
-    // Get attachment details for file deletion
-    const attachment = getAttachment(message.attachment_id);
-    if (attachment) {
-      // Delete the physical file if it exists
-      const fs = require('fs');
-      const path = require('path');
-      const config = require('../config');
-      const filePath = path.join(config.uploads.dir, attachment.filepath);
-      
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (err) {
-          logger.error('Failed to delete attachment file', { error: err.message, filePath });
-        }
+  const attachment = message?.attachment_id ? getAttachment(message.attachment_id) : null;
+
+  if (attachment) {
+    const filePath = path.join(config.upload.directory, attachment.filepath);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        logger.error('Failed to delete attachment file', { error: err.message, filePath });
       }
-      
-      // Delete attachment record
-      runQuery('DELETE FROM attachments WHERE id = ?', [message.attachment_id]);
     }
   }
-  
-  // Delete the message
-  return runQuery(
-    'DELETE FROM messages WHERE message_id = ? AND room_id = ?',
-    [messageId, roomId]
-  );
+
+  return runInTransaction(() => {
+    if (message?.attachment_id) {
+      runQuery('DELETE FROM attachments WHERE id = ?', [message.attachment_id]);
+    }
+
+    return runQuery(
+      'DELETE FROM messages WHERE message_id = ? AND room_id = ?',
+      [messageId, roomId]
+    );
+  });
 }
 
-function getRoomMessages(roomId, limit = 100) {
+function getRoomMessages(roomId, limit = 100, offset = 0) {
   return getAll(`
     SELECT m.message_id, m.room_id, m.sender_username, m.encrypted_data, m.iv, 
            m.state, m.created_at, m.attachment_id,
@@ -425,7 +439,33 @@ function getRoomMessages(roomId, limit = 100) {
     WHERE m.room_id = ?
     ORDER BY m.created_at ASC
     LIMIT ?
-  `, [roomId, limit]);
+    OFFSET ?
+  `, [roomId, limit, offset]);
+}
+
+function getRoomMessageCount(roomId) {
+  const row = getOne('SELECT COUNT(*) as count FROM messages WHERE room_id = ?', [roomId]);
+  return row?.count || 0;
+}
+
+function getRoomMessagesPage(roomId, page = 1, pageSize = 25) {
+  const safePage = Math.max(1, page);
+  const safePageSize = Math.max(1, pageSize);
+  const offset = (safePage - 1) * safePageSize;
+  const total = getRoomMessageCount(roomId);
+  const messages = getRoomMessages(roomId, safePageSize, offset);
+
+  return {
+    messages,
+    pagination: {
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+      hasNext: offset + messages.length < total,
+      hasPrevious: safePage > 1,
+    },
+  };
 }
 
 function markMessageDelivered(messageId, recipientUsername) {
@@ -476,6 +516,34 @@ function getAttachment(id) {
 
 function getRoomAttachments(roomId) {
   return getAll('SELECT * FROM attachments WHERE room_id = ? ORDER BY created_at DESC', [roomId]);
+}
+
+function getRoomAttachmentCount(roomId) {
+  const row = getOne('SELECT COUNT(*) as count FROM attachments WHERE room_id = ?', [roomId]);
+  return row?.count || 0;
+}
+
+function getRoomAttachmentsPage(roomId, page = 1, pageSize = 25) {
+  const safePage = Math.max(1, page);
+  const safePageSize = Math.max(1, pageSize);
+  const offset = (safePage - 1) * safePageSize;
+  const total = getRoomAttachmentCount(roomId);
+  const attachments = getAll(
+    'SELECT * FROM attachments WHERE room_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    [roomId, safePageSize, offset]
+  );
+
+  return {
+    attachments,
+    pagination: {
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+      hasNext: offset + attachments.length < total,
+      hasPrevious: safePage > 1,
+    },
+  };
 }
 
 // ==================== STATISTICS ====================
@@ -546,6 +614,7 @@ module.exports = {
   // Message operations
   storeMessage,
   getRoomMessages,
+  getRoomMessagesPage,
   markMessageDelivered,
   markMessageRead,
   deleteMessage,
@@ -554,9 +623,11 @@ module.exports = {
   createAttachment,
   getAttachment,
   getRoomAttachments,
+  getRoomAttachmentsPage,
 
   // Utilities
   getStats,
   close,
   saveDatabase,
+  runInTransaction,
 };

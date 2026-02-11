@@ -19,6 +19,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const os = require('os');
 const cors = require('cors');
+const helmet = require('helmet');
 
 // SSL certificate paths
 const SSL_KEY_PATH = path.join(__dirname, 'ssl', 'key.pem');
@@ -89,6 +90,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: config.security.csp.directives,
+  },
+}));
 
 // Request logging
 app.use(requestLogger);
@@ -102,10 +109,35 @@ app.use(express.urlencoded({ extended: true }));
 // Health check
 app.get('/api/health', (req, res) => {
   const stats = db.getStats();
+  const dbWritable = (() => {
+    try {
+      db.saveDatabase();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  })();
+  const uploadDirectoryAccessible = (() => {
+    try {
+      fs.accessSync(config.upload.directory, fs.constants.R_OK | fs.constants.W_OK);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  })();
+  const envValidation = Boolean(process.env.JWT_SECRET && process.env.JWT_REFRESH_SECRET);
+  const dependencies = {
+    database: dbWritable ? 'up' : 'down',
+    uploadStorage: uploadDirectoryAccessible ? 'up' : 'down',
+    environment: envValidation ? 'up' : 'down',
+  };
+  const degraded = Object.values(dependencies).includes('down');
+
   res.json({
-    status: 'healthy',
+    status: degraded ? 'degraded' : 'healthy',
     timestamp: new Date().toISOString(),
     stats,
+    dependencies,
   });
 });
 
