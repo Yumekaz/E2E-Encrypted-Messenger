@@ -62,69 +62,266 @@ function RoomPage({
 
   // ==================== SCREENSHOT DETECTION ====================
   
-  // Detect screenshot via Visibility API and keyboard shortcuts
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      // Detect when user switches tabs or minimizes
-      if (document.hidden) {
-        // User left the tab - could be taking a screenshot
-        // We don't alert on tab switch, only on actual screenshot detection
-      }
-    };
-
-    // Detect common screenshot keyboard shortcuts
+    // Simple keydown handler that catches ALL keys
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Print Screen key
-      if (e.key === 'PrintScreen') {
+      console.log('Key event:', e.type, 'key:', e.key, 'code:', e.code, 'keyCode:', e.keyCode);
+      
+      // Check for PrintScreen by keyCode (44 is the standard code)
+      if (e.keyCode === 44) {
+        console.log('PrintScreen detected via keyCode!');
         notifyScreenshot();
         return;
       }
       
-      // Windows + Shift + S (Snipping Tool)
-      // Ctrl + Shift + S (Some screenshot tools)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
-        // Small delay to let the screenshot tool open
-        setTimeout(() => notifyScreenshot(), 500);
+      // Check by key name
+      if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+        console.log('PrintScreen detected via key/code!');
+        notifyScreenshot();
         return;
       }
       
-      // Mac screenshot shortcuts: Cmd + Shift + 3/4/5
-      if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(e.key)) {
-        setTimeout(() => notifyScreenshot(), 500);
-        return;
+      // Detect Ctrl+V or Cmd+V (pasting screenshot)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        console.log('Paste shortcut detected, checking clipboard...');
+        // Check clipboard after a short delay
+        setTimeout(async () => {
+          try {
+            if (navigator.clipboard && navigator.clipboard.read) {
+              const items = await navigator.clipboard.read();
+              for (const item of items) {
+                if (item.types.some(type => type.includes('image'))) {
+                  console.log('Clipboard contains image - screenshot pasted!');
+                  notifyScreenshot();
+                  break;
+                }
+              }
+            }
+          } catch (err) {
+            // Clipboard API might not be available
+          }
+        }, 100);
       }
     };
 
-    // Detect when window loses focus (could be screenshot tool)
-    const handleBlur = () => {
-      // Small delay to check if it's a screenshot
-      setTimeout(() => {
-        if (document.hidden) {
-          // Tab switch, not screenshot
-        }
-      }, 100);
+    // Also try keyup as some systems fire on keyup
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.keyCode === 44 || e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+        console.log('PrintScreen detected on keyup!');
+        notifyScreenshot();
+      }
     };
+
+    // Try to prevent default for PrintScreen (might not work but worth trying)
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.keyCode === 44) {
+        console.log('PrintScreen keypress event!');
+        notifyScreenshot();
+      }
+    };
+
+    // Mobile-specific: Detect volume button + power button (common screenshot gesture)
+    let volumeDownPressed = false;
+    let powerPressed = false;
+    
+    const handleMobileKeyDown = (e: KeyboardEvent) => {
+      // Android: Volume Down + Power
+      if (e.key === 'AudioVolumeDown' || e.key === 'VolumeDown') {
+        volumeDownPressed = true;
+        checkMobileScreenshot();
+      }
+      if (e.key === 'Power' || e.key === 'WakeUp') {
+        powerPressed = true;
+        checkMobileScreenshot();
+      }
+    };
+
+    const handleMobileKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'AudioVolumeDown' || e.key === 'VolumeDown') {
+        volumeDownPressed = false;
+      }
+      if (e.key === 'Power' || e.key === 'WakeUp') {
+        powerPressed = false;
+      }
+    };
+
+    const checkMobileScreenshot = () => {
+      if (volumeDownPressed && powerPressed) {
+        notifyScreenshot();
+        volumeDownPressed = false;
+        powerPressed = false;
+      }
+    };
+
+    // Detect screen capture via Screen Capture API (if supported)
+    const detectScreenCapture = async () => {
+      try {
+        if ('mediaDevices' in navigator && 'getDisplayMedia' in navigator.mediaDevices) {
+          // Some browsers allow detecting when getDisplayMedia is called
+          const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
+          navigator.mediaDevices.getDisplayMedia = async function(...args) {
+            notifyScreenshot();
+            return originalGetDisplayMedia.apply(this, args);
+          };
+        }
+      } catch (err) {
+        // Ignore errors
+      }
+    };
+
+    // iOS specific: Detect when user takes screenshot using Notification API
+    const setupiOSDetection = () => {
+      // On iOS, taking a screenshot doesn't trigger any specific event
+      // But we can detect when the app comes back from background quickly
+      // which often happens after taking a screenshot
+      let lastFocusTime = Date.now();
+      
+      const checkiOSScreenshot = () => {
+        const now = Date.now();
+        const awayTime = now - lastFocusTime;
+        // If user was away for 2-4 seconds, might be screenshot
+        if (awayTime >= 1500 && awayTime <= 4000) {
+          notifyScreenshot();
+        }
+        lastFocusTime = now;
+      };
+
+      window.addEventListener('focus', checkiOSScreenshot);
+      return () => window.removeEventListener('focus', checkiOSScreenshot);
+    };
+
+    // Mobile gesture detection for 3-finger screenshot (iOS) or palm swipe (Android)
+    let touchStartTime = 0;
+    let touchPoints: TouchList | null = null;
+    let edgeSwipeStartX = 0;
+    let edgeSwipeStartY = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartTime = Date.now();
+      touchPoints = e.touches;
+      
+      // Check for edge swipe (common screenshot gesture on Android)
+      const touch = e.touches[0];
+      edgeSwipeStartX = touch.clientX;
+      edgeSwipeStartY = touch.clientY;
+      
+      // Detect 3-finger touch (iOS screenshot gesture)
+      if (e.touches.length === 3) {
+        // Wait to see if it's a screenshot gesture
+        setTimeout(() => {
+          if (Date.now() - touchStartTime < 500) {
+            notifyScreenshot();
+          }
+        }, 600);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const touchDuration = Date.now() - touchStartTime;
+      
+      // Check for palm swipe screenshot (Android)
+      if (e.changedTouches.length > 0) {
+        const touch = e.changedTouches[0];
+        const swipeDistance = Math.abs(touch.clientX - edgeSwipeStartX);
+        const verticalDistance = Math.abs(touch.clientY - edgeSwipeStartY);
+        
+        // Palm swipe is typically a fast horizontal swipe from edge
+        if (swipeDistance > 200 && verticalDistance < 100 && touchDuration < 300) {
+          // Check if started from edge
+          if (edgeSwipeStartX < 50 || edgeSwipeStartX > window.innerWidth - 50) {
+            notifyScreenshot();
+          }
+        }
+      }
+      
+      touchPoints = null;
+    };
+
+    // Add touch listeners to document for screenshot gesture detection
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     const notifyScreenshot = () => {
-      socket.emit('screenshot-detected', { roomId });
+      console.log('notifyScreenshot called, socket connected:', socket.connected, 'roomId:', roomId);
+      if (socket.connected && roomId) {
+        socket.emit('screenshot-detected', { roomId });
+        console.log('screenshot-detected event emitted');
+      } else {
+        console.log('Socket not connected or no roomId, cannot emit');
+      }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('blur', handleBlur);
+    // Detect paste events (user pasting a screenshot)
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.indexOf('image') !== -1) {
+            console.log('Image pasted - screenshot detected!');
+            notifyScreenshot();
+            break;
+          }
+        }
+      }
+    };
+
+    // Monitor for focus loss which happens during screenshots
+    let focusLossTime = 0;
+    const handleWindowBlur = () => {
+      focusLossTime = Date.now();
+    };
+    
+    const handleWindowFocus = () => {
+      const focusLossDuration = Date.now() - focusLossTime;
+      if (focusLossDuration >= 100 && focusLossDuration <= 2000) {
+        console.log('Quick focus loss detected - possible screenshot!');
+        notifyScreenshot();
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
+    document.addEventListener('keyup', handleKeyUp, true);
+    document.addEventListener('keypress', handleKeyPress, true);
+    document.addEventListener('keydown', handleMobileKeyDown);
+    document.addEventListener('keyup', handleMobileKeyUp);
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+    document.addEventListener('paste', handlePaste);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('focus', handleWindowFocus);
+    
+    detectScreenCapture();
+    const cleanupiOS = setupiOSDetection();
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keyup', handleKeyUp, true);
+      document.removeEventListener('keypress', handleKeyPress, true);
+      document.removeEventListener('keydown', handleMobileKeyDown);
+      document.removeEventListener('keyup', handleMobileKeyUp);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('paste', handlePaste);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('focus', handleWindowFocus);
+      cleanupiOS();
     };
   }, [roomId]);
 
   // Listen for screenshot warnings from other users
   useEffect(() => {
-    socket.on('screenshot-warning', ({ username: detectedUser, timestamp }) => {
+    console.log('Setting up screenshot-warning listener');
+    
+    const handleScreenshotWarning = ({ username: detectedUser, timestamp }: { username: string; timestamp: number }) => {
+      console.log('Screenshot warning received for user:', detectedUser);
       const warning = `⚠️ ${detectedUser} took a screenshot`;
       setScreenshotWarning(warning);
+      
+      // Also add as system message in chat
+      setMessages(prev => [...prev, {
+        type: 'system',
+        text: `⚠️ ${detectedUser} took a screenshot`,
+        timestamp: timestamp || Date.now()
+      } as SystemMessage]);
       
       // Auto-hide after 5 seconds
       if (screenshotTimeoutRef.current) {
@@ -133,12 +330,20 @@ function RoomPage({
       screenshotTimeoutRef.current = setTimeout(() => {
         setScreenshotWarning(null);
       }, 5000);
-    });
+    };
+    
+    socket.on('screenshot-warning', handleScreenshotWarning);
 
     return () => {
-      socket.off('screenshot-warning');
+      console.log('Removing screenshot-warning listener');
+      socket.off('screenshot-warning', handleScreenshotWarning);
     };
   }, []);
+  
+  // Log when screenshotWarning changes
+  useEffect(() => {
+    console.log('screenshotWarning state changed:', screenshotWarning);
+  }, [screenshotWarning]);
 
   // ==================== BLUR ON UNFOCUS ====================
   
@@ -826,6 +1031,12 @@ function RoomPage({
           <span className="warning-text">{screenshotWarning}</span>
         </div>
       )}
+
+      {/* Screenshot Watermark - visible on screenshots */}
+      <div className="screenshot-watermark">
+        <div className="watermark-text">{username}</div>
+        <div className="watermark-time">{new Date().toLocaleString()}</div>
+      </div>
     </div>
   );
 }

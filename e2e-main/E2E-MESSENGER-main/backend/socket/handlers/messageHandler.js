@@ -14,12 +14,22 @@ function createMessageHandler(io, socket, state) {
    * Screenshot detection notification
    */
   socket.on('screenshot-detected', ({ roomId }) => {
+    console.log('screenshot-detected event received from socket:', socket.id, 'roomId:', roomId);
+    
     const user = users.get(socket.id);
-    if (!user) return;
+    if (!user) {
+      console.log('No user found for socket:', socket.id);
+      return;
+    }
 
     // Verify user is in the room
-    if (!db.isRoomMember(roomId, user.username)) return;
+    if (!db.isRoomMember(roomId, user.username)) {
+      console.log('User not in room:', user.username, roomId);
+      return;
+    }
 
+    console.log('Broadcasting screenshot-warning to room:', roomId, 'user:', user.username);
+    
     // Broadcast warning to all room members
     io.to(roomId).emit('screenshot-warning', { 
       username: user.username,
