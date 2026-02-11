@@ -10,8 +10,8 @@ function Toast({ message, type }: ToastProps): JSX.Element {
   };
 
   return (
-    <div className={`toast toast-${type}`}>
-      <span className="toast-icon">{iconMap[type]}</span>
+    <div className={`toast toast-${type}`} role="alert" aria-live="polite">
+      <span className="toast-icon" aria-hidden="true">{iconMap[type]}</span>
       <span className="toast-message">{message}</span>
     </div>
   );

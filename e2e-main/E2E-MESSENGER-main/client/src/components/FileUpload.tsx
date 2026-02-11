@@ -99,14 +99,16 @@ function FileUpload({ roomId, onFileUploaded, disabled = false, encryptFile }: E
         disabled={uploading || disabled}
         style={{ display: 'none' }}
         accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.doc,.docx"
+        aria-label="Upload file"
       />
       
       <button
         type="button"
-        className="btn btn-icon file-upload-btn"
+        className="file-upload-btn"
         onClick={handleClick}
         disabled={uploading || disabled}
         title={encryptFile ? "Attach encrypted file" : "Attach file"}
+        aria-label={encryptFile ? "Attach encrypted file" : "Attach file"}
       >
         {uploading ? (
           <div className="upload-progress">
@@ -114,7 +116,7 @@ function FileUpload({ roomId, onFileUploaded, disabled = false, encryptFile }: E
             <span className="progress-text">{progress}%</span>
           </div>
         ) : (
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path 
               d="M21.44 11.05L12.25 20.24C11.1242 21.3658 9.59718 21.9983 8.00498 21.9983C6.41278 21.9983 4.88584 21.3658 3.76 20.24C2.63416 19.1142 2.00166 17.5872 2.00166 15.995C2.00166 14.4028 2.63416 12.8758 3.76 11.75L12.33 3.18C13.0806 2.42927 14.0948 2.00615 15.1525 2.00615C16.2102 2.00615 17.2244 2.42927 17.975 3.18C18.7257 3.93064 19.1488 4.94482 19.1488 6.0025C19.1488 7.06019 18.7257 8.07436 17.975 8.825L9.41 17.39C9.03472 17.7653 8.52756 17.9768 7.995 17.9768C7.46244 17.9768 6.95528 17.7653 6.58 17.39C6.20472 17.0147 5.99328 16.5076 5.99328 15.975C5.99328 15.4424 6.20472 14.9353 6.58 14.56L15.07 6.07" 
               stroke="currentColor" 

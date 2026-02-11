@@ -16,17 +16,22 @@ function ConfirmModal({
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <h3 className="modal-title">{title}</h3>
-        <p className="modal-message">{message}</p>
+      <div className={`modal-content ${isDanger ? 'confirm-modal' : ''}`} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3 className="modal-title">{title}</h3>
+        </div>
         
-        {details && details.length > 0 && (
-          <ul className="modal-details">
-            {details.map((detail, index) => (
-              <li key={index}>• {detail}</li>
-            ))}
-          </ul>
-        )}
+        <div className="confirm-content">
+          <p className="modal-message">{message}</p>
+          
+          {details && details.length > 0 && (
+            <ul className="confirm-details">
+              {details.map((detail, index) => (
+                <li key={index}>{detail}</li>
+              ))}
+            </ul>
+          )}
+        </div>
         
         <div className="modal-actions">
           <button 

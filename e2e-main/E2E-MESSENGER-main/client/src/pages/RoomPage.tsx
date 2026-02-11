@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, FormEvent, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import socket from '../socket';
 import { QRCodeCanvas } from 'qrcode.react';
 import ConfirmModal from '../components/ConfirmModal';
 import FileUpload from '../components/FileUpload';
 import MessageAttachment from '../components/MessageAttachment';
 import fileService from '../services/fileService';
+import { Button, IconButton } from '../components/Button';
+import { NoMessagesState } from '../components/EmptyState';
 import type { 
   RoomPageProps, 
   DecryptedMessage, 
@@ -25,6 +28,148 @@ interface EncryptedAttachmentData extends Attachment {
 // Message with possible attachment
 interface MessageWithAttachment extends DecryptedMessage {
   attachment?: EncryptedAttachmentData;
+}
+
+// Message Bubble Component
+function MessageBubble({ 
+  message, 
+  isOwn, 
+  isSystem,
+  onContextMenu 
+}: { 
+  message: MessageWithAttachment | SystemMessage; 
+  isOwn: boolean;
+  isSystem: boolean;
+  onContextMenu?: (e: React.MouseEvent) => void;
+}): JSX.Element {
+  if (isSystem) {
+    return (
+      <div className="flex justify-center my-4">
+        <span className="text-xs text-slate-500 bg-slate-900/50 px-3 py-1 rounded-full">
+          {(message as SystemMessage).text}
+        </span>
+      </div>
+    );
+  }
+
+  const msg = message as MessageWithAttachment;
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-4`}
+      onContextMenu={onContextMenu}
+    >
+      <div className={`max-w-[75%] group ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+        {!isOwn && (
+          <span className="text-xs text-slate-500 mb-1 ml-1">{msg.senderUsername}</span>
+        )}
+        <div
+          className={`
+            relative px-4 py-2.5 rounded-2xl cursor-context-menu
+            ${isOwn 
+              ? 'bg-indigo-600 text-white rounded-br-md' 
+              : 'bg-slate-800 text-slate-200 rounded-bl-md border border-slate-700/50'
+            }
+          `}
+        >
+          <p className="text-sm leading-relaxed">{msg.text}</p>
+          
+          {msg.attachment && (
+            <div className="mt-2">
+              <MessageAttachment attachment={msg.attachment} />
+            </div>
+          )}
+          
+          <div className={`flex items-center gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+            <span className={`text-[10px] ${isOwn ? 'text-indigo-200' : 'text-slate-500'}`}>
+              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+            {isOwn && msg.decrypted && (
+              <svg className="w-3 h-3 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// Typing Indicator
+function TypingIndicator({ users }: { users: string[] }): JSX.Element {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      className="flex items-center gap-2 text-slate-500 text-sm mb-4"
+    >
+      <div className="flex gap-1">
+        <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+      <span>{users.join(', ')} {users.length === 1 ? 'is' : 'are'} typing...</span>
+    </motion.div>
+  );
+}
+
+// Delete Menu Component
+function DeleteMenu({ 
+  messageId,
+  onDeleteForEveryone, 
+  onDeleteForMe, 
+  onCancel,
+  position 
+}: { 
+  messageId: string;
+  onDeleteForEveryone: () => void;
+  onDeleteForMe: () => void;
+  onCancel: () => void;
+  position: { x: number; y: number };
+}): JSX.Element {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      style={{ 
+        position: 'fixed',
+        left: position.x,
+        top: position.y,
+        zIndex: 100
+      }}
+      className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden min-w-[180px]"
+    >
+      <button
+        onClick={onDeleteForEveryone}
+        className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete for everyone
+      </button>
+      <button
+        onClick={onDeleteForMe}
+        className="w-full px-4 py-3 text-left text-sm text-amber-400 hover:bg-amber-500/10 flex items-center gap-2 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+        </svg>
+        Delete for me
+      </button>
+      <button
+        onClick={onCancel}
+        className="w-full px-4 py-3 text-left text-sm text-slate-400 hover:bg-slate-800 flex items-center gap-2 transition-colors border-t border-slate-800"
+      >
+        Cancel
+      </button>
+    </motion.div>
+  );
 }
 
 function RoomPage({
@@ -49,8 +194,7 @@ function RoomPage({
   const [uploadingFile, setUploadingFile] = useState<boolean>(false);
   const [isBlurred, setIsBlurred] = useState<boolean>(false);
   const [screenshotWarning, setScreenshotWarning] = useState<string | null>(null);
-  const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
-  const [showDeleteMenu, setShowDeleteMenu] = useState<string | null>(null);
+  const [deleteMenu, setDeleteMenu] = useState<{ messageId: string; position: { x: number; y: number } } | null>(null);
   const [deletedMessageIds, setDeletedMessageIds] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -58,206 +202,36 @@ function RoomPage({
   const prevMessagesLengthRef = useRef<number>(0);
   const userHasScrolledRef = useRef<boolean>(false);
   const screenshotTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const deleteMenuRef = useRef<HTMLDivElement>(null);
 
-  // ==================== SCREENSHOT DETECTION ====================
-  
+  // Screenshot detection
   useEffect(() => {
-    // Simple keydown handler that catches ALL keys
     const handleKeyDown = (e: KeyboardEvent) => {
-      console.log('Key event:', e.type, 'key:', e.key, 'code:', e.code, 'keyCode:', e.keyCode);
-      
-      // Check for PrintScreen by keyCode (44 is the standard code)
-      if (e.keyCode === 44) {
-        console.log('PrintScreen detected via keyCode!');
+      if (e.key === 'PrintScreen' || e.keyCode === 44) {
         notifyScreenshot();
-        return;
       }
       
-      // Check by key name
-      if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
-        console.log('PrintScreen detected via key/code!');
-        notifyScreenshot();
-        return;
-      }
-      
-      // Detect Ctrl+V or Cmd+V (pasting screenshot)
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
-        console.log('Paste shortcut detected, checking clipboard...');
-        // Check clipboard after a short delay
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
         setTimeout(async () => {
           try {
             if (navigator.clipboard && navigator.clipboard.read) {
               const items = await navigator.clipboard.read();
               for (const item of items) {
                 if (item.types.some(type => type.includes('image'))) {
-                  console.log('Clipboard contains image - screenshot pasted!');
                   notifyScreenshot();
                   break;
                 }
               }
             }
-          } catch (err) {
-            // Clipboard API might not be available
-          }
+          } catch (err) {}
         }, 100);
       }
     };
 
-    // Also try keyup as some systems fire on keyup
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.keyCode === 44 || e.key === 'PrintScreen' || e.code === 'PrintScreen') {
-        console.log('PrintScreen detected on keyup!');
-        notifyScreenshot();
-      }
-    };
-
-    // Try to prevent default for PrintScreen (might not work but worth trying)
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.keyCode === 44) {
-        console.log('PrintScreen keypress event!');
-        notifyScreenshot();
-      }
-    };
-
-    // Mobile-specific: Detect volume button + power button (common screenshot gesture)
-    let volumeDownPressed = false;
-    let powerPressed = false;
-    
-    const handleMobileKeyDown = (e: KeyboardEvent) => {
-      // Android: Volume Down + Power
-      if (e.key === 'AudioVolumeDown' || e.key === 'VolumeDown') {
-        volumeDownPressed = true;
-        checkMobileScreenshot();
-      }
-      if (e.key === 'Power' || e.key === 'WakeUp') {
-        powerPressed = true;
-        checkMobileScreenshot();
-      }
-    };
-
-    const handleMobileKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'AudioVolumeDown' || e.key === 'VolumeDown') {
-        volumeDownPressed = false;
-      }
-      if (e.key === 'Power' || e.key === 'WakeUp') {
-        powerPressed = false;
-      }
-    };
-
-    const checkMobileScreenshot = () => {
-      if (volumeDownPressed && powerPressed) {
-        notifyScreenshot();
-        volumeDownPressed = false;
-        powerPressed = false;
-      }
-    };
-
-    // Detect screen capture via Screen Capture API (if supported)
-    const detectScreenCapture = async () => {
-      try {
-        if ('mediaDevices' in navigator && 'getDisplayMedia' in navigator.mediaDevices) {
-          // Some browsers allow detecting when getDisplayMedia is called
-          const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
-          navigator.mediaDevices.getDisplayMedia = async function(...args) {
-            notifyScreenshot();
-            return originalGetDisplayMedia.apply(this, args);
-          };
-        }
-      } catch (err) {
-        // Ignore errors
-      }
-    };
-
-    // iOS specific: Detect when user takes screenshot using Notification API
-    const setupiOSDetection = () => {
-      // On iOS, taking a screenshot doesn't trigger any specific event
-      // But we can detect when the app comes back from background quickly
-      // which often happens after taking a screenshot
-      let lastFocusTime = Date.now();
-      
-      const checkiOSScreenshot = () => {
-        const now = Date.now();
-        const awayTime = now - lastFocusTime;
-        // If user was away for 2-4 seconds, might be screenshot
-        if (awayTime >= 1500 && awayTime <= 4000) {
-          notifyScreenshot();
-        }
-        lastFocusTime = now;
-      };
-
-      window.addEventListener('focus', checkiOSScreenshot);
-      return () => window.removeEventListener('focus', checkiOSScreenshot);
-    };
-
-    // Mobile gesture detection for 3-finger screenshot (iOS) or palm swipe (Android)
-    let touchStartTime = 0;
-    let touchPoints: TouchList | null = null;
-    let edgeSwipeStartX = 0;
-    let edgeSwipeStartY = 0;
-
-    const handleTouchStart = (e: TouchEvent) => {
-      touchStartTime = Date.now();
-      touchPoints = e.touches;
-      
-      // Check for edge swipe (common screenshot gesture on Android)
-      const touch = e.touches[0];
-      edgeSwipeStartX = touch.clientX;
-      edgeSwipeStartY = touch.clientY;
-      
-      // Detect 3-finger touch (iOS screenshot gesture)
-      if (e.touches.length === 3) {
-        // Wait to see if it's a screenshot gesture
-        setTimeout(() => {
-          if (Date.now() - touchStartTime < 500) {
-            notifyScreenshot();
-          }
-        }, 600);
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      const touchDuration = Date.now() - touchStartTime;
-      
-      // Check for palm swipe screenshot (Android)
-      if (e.changedTouches.length > 0) {
-        const touch = e.changedTouches[0];
-        const swipeDistance = Math.abs(touch.clientX - edgeSwipeStartX);
-        const verticalDistance = Math.abs(touch.clientY - edgeSwipeStartY);
-        
-        // Palm swipe is typically a fast horizontal swipe from edge
-        if (swipeDistance > 200 && verticalDistance < 100 && touchDuration < 300) {
-          // Check if started from edge
-          if (edgeSwipeStartX < 50 || edgeSwipeStartX > window.innerWidth - 50) {
-            notifyScreenshot();
-          }
-        }
-      }
-      
-      touchPoints = null;
-    };
-
-    // Add touch listeners to document for screenshot gesture detection
-    document.addEventListener('touchstart', handleTouchStart, { passive: true });
-    document.addEventListener('touchend', handleTouchEnd, { passive: true });
-
-    const notifyScreenshot = () => {
-      console.log('notifyScreenshot called, socket connected:', socket.connected, 'roomId:', roomId);
-      if (socket.connected && roomId) {
-        socket.emit('screenshot-detected', { roomId });
-        console.log('screenshot-detected event emitted');
-      } else {
-        console.log('Socket not connected or no roomId, cannot emit');
-      }
-    };
-
-    // Detect paste events (user pasting a screenshot)
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (items) {
         for (let i = 0; i < items.length; i++) {
           if (items[i].type.indexOf('image') !== -1) {
-            console.log('Image pasted - screenshot detected!');
             notifyScreenshot();
             break;
           }
@@ -265,65 +239,33 @@ function RoomPage({
       }
     };
 
-    // Monitor for focus loss which happens during screenshots
-    let focusLossTime = 0;
-    const handleWindowBlur = () => {
-      focusLossTime = Date.now();
-    };
-    
-    const handleWindowFocus = () => {
-      const focusLossDuration = Date.now() - focusLossTime;
-      if (focusLossDuration >= 100 && focusLossDuration <= 2000) {
-        console.log('Quick focus loss detected - possible screenshot!');
-        notifyScreenshot();
+    const notifyScreenshot = () => {
+      if (socket.connected && roomId) {
+        socket.emit('screenshot-detected', { roomId });
       }
     };
 
-    // Add event listeners
-    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
-    document.addEventListener('keyup', handleKeyUp, true);
-    document.addEventListener('keypress', handleKeyPress, true);
-    document.addEventListener('keydown', handleMobileKeyDown);
-    document.addEventListener('keyup', handleMobileKeyUp);
-    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+    document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('paste', handlePaste);
-    window.addEventListener('blur', handleWindowBlur);
-    window.addEventListener('focus', handleWindowFocus);
-    
-    detectScreenCapture();
-    const cleanupiOS = setupiOSDetection();
 
     return () => {
-      document.removeEventListener('keydown', handleKeyDown, true);
-      document.removeEventListener('keyup', handleKeyUp, true);
-      document.removeEventListener('keypress', handleKeyPress, true);
-      document.removeEventListener('keydown', handleMobileKeyDown);
-      document.removeEventListener('keyup', handleMobileKeyUp);
-      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('paste', handlePaste);
-      window.removeEventListener('blur', handleWindowBlur);
-      window.removeEventListener('focus', handleWindowFocus);
-      cleanupiOS();
     };
   }, [roomId]);
 
-  // Listen for screenshot warnings from other users
+  // Screenshot warning listener
   useEffect(() => {
-    console.log('Setting up screenshot-warning listener');
-    
-    const handleScreenshotWarning = ({ username: detectedUser, timestamp }: { username: string; timestamp: number }) => {
-      console.log('Screenshot warning received for user:', detectedUser);
+    const handleScreenshotWarning = ({ username: detectedUser }: { username: string; timestamp: number }) => {
       const warning = `⚠️ ${detectedUser} took a screenshot`;
       setScreenshotWarning(warning);
       
-      // Also add as system message in chat
       setMessages(prev => [...prev, {
         type: 'system',
         text: `⚠️ ${detectedUser} took a screenshot`,
-        timestamp: timestamp || Date.now()
+        timestamp: Date.now()
       } as SystemMessage]);
       
-      // Auto-hide after 5 seconds
       if (screenshotTimeoutRef.current) {
         clearTimeout(screenshotTimeoutRef.current);
       }
@@ -333,78 +275,45 @@ function RoomPage({
     };
     
     socket.on('screenshot-warning', handleScreenshotWarning);
-
     return () => {
-      console.log('Removing screenshot-warning listener');
       socket.off('screenshot-warning', handleScreenshotWarning);
     };
   }, []);
-  
-  // Log when screenshotWarning changes
-  useEffect(() => {
-    console.log('screenshotWarning state changed:', screenshotWarning);
-  }, [screenshotWarning]);
 
-  // ==================== BLUR ON UNFOCUS ====================
-  
+  // Blur on unfocus
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        setIsBlurred(true);
-      } else {
-        // Small delay to allow user to see the blur effect before unblurring
-        setTimeout(() => setIsBlurred(false), 300);
-      }
-    };
-
-    // Also blur when window loses focus
-    const handleWindowBlur = () => {
-      setIsBlurred(true);
-    };
-
-    const handleWindowFocus = () => {
-      setTimeout(() => setIsBlurred(false), 300);
+      setIsBlurred(document.hidden);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleWindowBlur);
-    window.addEventListener('focus', handleWindowFocus);
-
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
-  // ==================== MESSAGE DELETION ====================
-  
+  // Message deletion handlers
   const handleDeleteForEveryone = useCallback((messageId: string) => {
     socket.emit('delete-message-everyone', { roomId, messageId });
-    setShowDeleteMenu(null);
+    setDeleteMenu(null);
   }, [roomId]);
 
   const handleDeleteForMe = useCallback((messageId: string) => {
     socket.emit('delete-message-me', { roomId, messageId });
     setDeletedMessageIds(prev => new Set(prev).add(messageId));
-    setShowDeleteMenu(null);
+    setDeleteMenu(null);
   }, [roomId]);
 
-  // Listen for message deletions
   useEffect(() => {
-    socket.on('message-deleted', ({ messageId, deletedBy, mode }) => {
+    socket.on('message-deleted', ({ messageId, deletedBy, mode }: { messageId: string; deletedBy: string; mode: string }) => {
       if (mode === 'everyone') {
-        // Remove the message for everyone
         setMessages(prev => prev.filter(msg => (msg as DecryptedMessage).id !== messageId));
-        
-        // Add system message about deletion
         setMessages(prev => [...prev, {
           type: 'system',
           text: `🗑️ ${deletedBy} deleted a message`,
           timestamp: Date.now()
         } as SystemMessage]);
       } else if (mode === 'me' && deletedBy === username) {
-        // Only delete for current user
         setDeletedMessageIds(prev => new Set(prev).add(messageId));
       }
     });
@@ -414,45 +323,22 @@ function RoomPage({
     };
   }, [username]);
 
-  // Close delete menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (deleteMenuRef.current && !deleteMenuRef.current.contains(event.target as Node)) {
-        setShowDeleteMenu(null);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  // Handle message context menu (right-click)
+  // Handle message context menu
   const handleMessageContextMenu = (e: React.MouseEvent, messageId: string, senderUsername: string) => {
     e.preventDefault();
-    setShowDeleteMenu(messageId);
+    if (senderUsername === username) {
+      setDeleteMenu({ messageId, position: { x: e.clientX, y: e.clientY } });
+    }
   };
 
-  // Decrypt an attachment and return a blob URL
+  // Decrypt attachment
   const decryptAttachment = async (attachment: EncryptedAttachmentData): Promise<string | null> => {
     if (!attachment.encrypted || !attachment.iv || !attachment.metadata) {
-      // Not encrypted, return original URL
       return attachment.url;
     }
-
     try {
-      // Download encrypted file
       const encryptedBlob = await fileService.downloadEncryptedFile(attachment.url);
-      
-      // Decrypt using room key
-      const decrypted = await encryption.decryptFile(
-        encryptedBlob,
-        attachment.iv,
-        attachment.metadata
-      );
-
-      // Create blob URL for display
+      const decrypted = await encryption.decryptFile(encryptedBlob, attachment.iv, attachment.metadata);
       return URL.createObjectURL(decrypted.blob);
     } catch (error) {
       console.error('Failed to decrypt attachment:', error);
@@ -461,31 +347,21 @@ function RoomPage({
   };
 
   useEffect(() => {
-    // Get key fingerprint
     encryption.getFingerprint().then(setFingerprint);
-
-    // Fetch server network info for QR code
     fetch('/api/network-info')
       .then(res => res.json())
       .then(data => setServerUrl(data.url))
       .catch(() => setServerUrl(window.location.origin));
 
-    // Join room
     socket.emit('join-room', { roomId });
 
-    // Handle room data
     socket.on('room-data', async ({ members: roomMembers, memberKeys, encryptedMessages }) => {
       setMembers(roomMembers);
-
-      // Update room key with all member keys
       await onUpdateRoomKey(memberKeys);
-
-      // Decrypt existing messages
+      
       const decrypted = await Promise.all(
         encryptedMessages.map(async (msg: EncryptedMessage) => {
           const text = await encryption.decrypt(msg.encryptedData, msg.iv);
-          
-          // Handle attachment decryption if present
           let decryptedAttachment: EncryptedAttachmentData | undefined;
           if ((msg as any).attachment) {
             const att = (msg as any).attachment as EncryptedAttachmentData;
@@ -496,7 +372,6 @@ function RoomPage({
               decryptedAttachment = att;
             }
           }
-
           return {
             ...msg,
             text: text || '🔒 Could not decrypt',
@@ -508,11 +383,8 @@ function RoomPage({
       setMessages(decrypted);
     });
 
-    // Handle new encrypted message
     socket.on('new-encrypted-message', async (msg: EncryptedMessage) => {
       const text = await encryption.decrypt(msg.encryptedData, msg.iv);
-      
-      // Handle attachment decryption if present
       let decryptedAttachment: EncryptedAttachmentData | undefined;
       if ((msg as any).attachment) {
         const att = (msg as any).attachment as EncryptedAttachmentData;
@@ -523,7 +395,6 @@ function RoomPage({
           decryptedAttachment = att;
         }
       }
-
       setMessages(prev => [...prev, {
         ...msg,
         text: text || '🔒 Could not decrypt',
@@ -543,10 +414,10 @@ function RoomPage({
       }, 3000);
     });
 
-    socket.on('member-joined', async ({ username: joinedUser }: { username: string; publicKey: string }) => {
+    socket.on('member-joined', ({ username: joinedUser }: { username: string; publicKey: string }) => {
       setMessages(prev => [...prev, {
         type: 'system',
-        text: `🔐 ${joinedUser} joined with verified encryption`,
+        text: `🔐 ${joinedUser} joined`,
         timestamp: Date.now()
       } as SystemMessage]);
     });
@@ -554,7 +425,7 @@ function RoomPage({
     socket.on('member-left', ({ username: leftUser }: { username: string }) => {
       setMessages(prev => [...prev, {
         type: 'system',
-        text: `${leftUser} left the room`,
+        text: `${leftUser} left`,
         timestamp: Date.now()
       } as SystemMessage]);
     });
@@ -574,46 +445,11 @@ function RoomPage({
     };
   }, [roomId, encryption, onUpdateRoomKey]);
 
-  // Mark that user has manually scrolled
-  const handleScroll = () => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = container;
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-    // If user scrolled up more than 150px, mark as manually scrolled
-    if (distanceFromBottom > 150) {
-      userHasScrolledRef.current = true;
-    } else {
-      // If they scroll back near bottom, re-enable auto-scroll
-      userHasScrolledRef.current = false;
-    }
-  };
-
-  // Handle touch events for mobile
-  const handleTouchStart = () => {
-    handleScroll();
-  };
-
-  const handleTouchMove = () => {
-    handleScroll();
-  };
-
-  const handleTouchEnd = () => {
-    handleScroll();
-  };
-
-  // Auto-scroll to bottom on new messages (unless user scrolled up)
   useEffect(() => {
     const hasNewMessages = messages.length > prevMessagesLengthRef.current;
     prevMessagesLengthRef.current = messages.length;
-
-    // Only auto-scroll if: 1) new messages added, 2) user hasn't scrolled up
     if (hasNewMessages && !userHasScrolledRef.current) {
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }, 100);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
 
@@ -622,16 +458,13 @@ function RoomPage({
     if (!inputText.trim()) return;
 
     try {
-      // Encrypt message before sending
       const { encryptedData, iv } = await encryption.encrypt(inputText.trim());
-
       socket.emit('send-encrypted-message', {
         roomId,
         encryptedData,
         iv,
         senderUsername: username
       });
-
       setInputText('');
     } catch (error) {
       console.error('Encryption failed:', error);
@@ -640,402 +473,416 @@ function RoomPage({
 
   const handleTyping = (): void => {
     socket.emit('typing', { roomId });
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
   };
 
-  // Handle encrypted file upload
-  const handleEncryptFile = async (file: File): Promise<{ blob: Blob; iv: string; metadata: string }> => {
-    return await encryption.encryptFile(file);
-  };
-
-  const handleFileUploaded = async (attachment: Attachment): Promise<void> => {
-    try {
-      // Encrypt a message about the file
-      const messageText = `📎 Shared encrypted file: ${attachment.filename}`;
-      const { encryptedData, iv } = await encryption.encrypt(messageText);
-
-      socket.emit('send-encrypted-message', {
-        roomId,
-        encryptedData,
-        iv,
-        senderUsername: username,
-        attachmentId: attachment.id
-      });
-    } catch (error) {
-      console.error('Failed to send file message:', error);
-    }
-  };
-
-  const formatTime = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-
-    if (isToday) {
-      // Today: show time only
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    } else {
-      // Other days: show date and time
-      return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
-  };
-
-  const copyRoomCode = (): void => {
-    navigator.clipboard.writeText(roomCode);
-  };
-
-  const handleLeaveClick = (): void => {
-    setShowLeaveConfirm(true);
-  };
-
-  const handleConfirmLeave = (): void => {
-    setShowLeaveConfirm(false);
-    onLeave();
-  };
-
-  const handleCancelLeave = (): void => {
-    setShowLeaveConfirm(false);
-  };
-
-  // Helper to check if message is system message
   const isSystemMessage = (msg: Message): msg is SystemMessage => {
     return (msg as SystemMessage).type === 'system';
   };
 
   return (
-    <div className="page room-page">
-      <div className="room-container">
-        {/* Header */}
-        <div className="room-header">
-          <div className="room-info-left">
-            <button className="btn-back" onClick={handleLeaveClick}>
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <div className="room-title-section">
-              <h3>
-                <span className="lock-icon">🔒</span>
-                Room {roomCode}
-                {roomType === 'authenticated' && (
-                  <span style={{
-                    marginLeft: '8px',
-                    fontSize: '11px',
-                    padding: '2px 8px',
-                    background: '#4CAF50',
-                    color: 'white',
-                    borderRadius: '12px',
-                    fontWeight: 'normal',
-                    verticalAlign: 'middle'
-                  }}>
-                    ✓ Authenticated
-                  </span>
-                )}
-                {roomType === 'legacy' && (
-                  <span style={{
-                    marginLeft: '8px',
-                    fontSize: '11px',
-                    padding: '2px 8px',
-                    background: '#FF9800',
-                    color: 'white',
-                    borderRadius: '12px',
-                    fontWeight: 'normal',
-                    verticalAlign: 'middle'
-                  }}>
-                    Legacy
-                  </span>
-                )}
-              </h3>
-              <span className="member-count">{members.length} member{members.length !== 1 ? 's' : ''}</span>
-            </div>
+    <div className="h-screen flex flex-col bg-slate-950">
+      {/* Header */}
+      <header className="h-14 sm:h-16 border-b border-slate-800/50 bg-slate-950/80 backdrop-blur-xl flex items-center px-3 sm:px-4 gap-2 sm:gap-4 z-10">
+        <IconButton onClick={() => setShowLeaveConfirm(true)} className="!w-9 !h-9 sm:!w-10 sm:!h-10">
+          <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </IconButton>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="font-semibold text-white text-sm sm:text-base truncate">Room {roomCode}</h1>
+            {roomType === 'authenticated' ? (
+              <span className="px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium bg-emerald-500/20 text-emerald-400 rounded-full border border-emerald-500/30 flex-shrink-0">
+                Verified
+              </span>
+            ) : (
+              <span className="px-1.5 py-0.5 text-[9px] sm:text-[10px] font-medium bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30 flex-shrink-0">
+                Guest
+              </span>
+            )}
           </div>
-          <div className="header-actions">
-            <button
-              className="btn btn-icon"
-              onClick={() => setShowRoomInfo(!showRoomInfo)}
-              title="Room Info"
-            >
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M12 8V12M12 16H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              className="btn btn-icon"
-              onClick={() => setShowMembers(!showMembers)}
-              title="Members"
-            >
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="9" cy="7" r="3" stroke="currentColor" strokeWidth="1.5" />
-                <circle cx="17" cy="7" r="2" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M3 21V18C3 16.3431 4.34315 15 6 15H12C13.6569 15 15 16.3431 15 18V21" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M17 15C18.6569 15 20 16.3431 20 18V21" stroke="currentColor" strokeWidth="1.5" />
-              </svg>
-            </button>
-            <button
-              className="btn btn-icon btn-leave"
-              onClick={handleLeaveClick}
-              title={isOwner ? "Close Room (deletes all data)" : "Leave Room"}
-              style={{
-                background: 'rgba(255, 75, 75, 0.2)',
-                borderColor: 'rgba(255, 75, 75, 0.5)'
-              }}
-            >
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="#ff4b4b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M16 17L21 12L16 7" stroke="#ff4b4b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M21 12H9" stroke="#ff4b4b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
+          <p className="text-[10px] sm:text-xs text-slate-500">{members.length} member{members.length !== 1 ? 's' : ''}</p>
         </div>
 
-        {/* Room Info Panel */}
-        {showRoomInfo && (
-          <div className="room-info-panel">
-            <div className="info-panel-header">
-              <h4>🔐 Encryption Info</h4>
-              <button className="close-btn" onClick={() => setShowRoomInfo(false)}>×</button>
-            </div>
-            <div className="info-panel-content">
-              <div className="info-row">
-                <span className="info-label">Room Code</span>
-                <div className="code-display">
-                  <span className="code-value">{roomCode}</span>
-                  <button className="copy-btn" onClick={copyRoomCode}>Copy</button>
-                </div>
-              </div>
-              <div className="info-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
-                <span className="info-label">Mobile Join</span>
-                <div style={{ background: 'white', padding: '10px', borderRadius: '8px', alignSelf: 'center' }}>
-                  <QRCodeCanvas
-                    value={`${serverUrl || window.location.origin}/?room=${roomCode}`}
-                    size={150}
-                    level={'H'}
-                    marginSize={2}
-                  />
-                </div>
-                <small style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem', textAlign: 'center', width: '100%' }}>
-                  Ensure you are accessing via IP
-                </small>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Your Key Fingerprint</span>
-                <code className="fingerprint">{fingerprint}</code>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Encryption</span>
-                <span className="encryption-type">AES-256-GCM</span>
-              </div>
-              <div className="info-row">
-                <span className="info-label">Key Exchange</span>
-                <span className="encryption-type">ECDH P-256</span>
-              </div>
-              <div className="security-note">
-                <span className="note-icon">ℹ️</span>
-                Messages and files are encrypted end-to-end. The server cannot read them.
-              </div>
-            </div>
-          </div>
-        )}
+        <div className="flex items-center gap-0.5 sm:gap-1">
+          {/* Info Button */}
+          <IconButton onClick={() => setShowRoomInfo(true)} variant="ghost" title="Room Info" className="!w-9 !h-9 sm:!w-10 sm:!h-10">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </IconButton>
+          
+          {/* Members Button */}
+          <IconButton onClick={() => setShowMembers(true)} variant="ghost" title="Members" className="!w-9 !h-9 sm:!w-10 sm:!h-10">
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          </IconButton>
+        </div>
+      </header>
 
-        <div className="room-content">
-          {/* Messages Area */}
-          <div
-            className="messages-container"
-            ref={messagesContainerRef}
-            onScroll={handleScroll}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
-            <div className="encryption-banner">
-              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="banner-icon">
-                <path d="M12 2L4 6V12C4 17 8 21 12 22C16 21 20 17 20 12V6L12 2Z" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M9 12L11 14L15 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Messages and files are end-to-end encrypted</span>
+      {/* Messages */}
+      <div 
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 space-y-2"
+      >
+        {messages.length === 0 ? (
+          <NoMessagesState roomName={`Room ${roomCode}`} />
+        ) : (
+          <>
+            <div className="flex justify-center mb-6">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20">
+                <svg className="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <span className="text-xs text-indigo-400">End-to-end encrypted</span>
+              </div>
             </div>
-
+            
             {messages.map((msg, index) => {
               const msgId = (msg as DecryptedMessage).id;
               const isDeleted = deletedMessageIds.has(msgId);
-              
-              if (isDeleted && !isSystemMessage(msg)) {
-                return null;
-              }
+              if (isDeleted && !isSystemMessage(msg)) return null;
               
               return (
-                <div
+                <MessageBubble
                   key={msgId || index}
-                  className={`message ${isSystemMessage(msg)
-                    ? 'system-message'
-                    : (msg as DecryptedMessage).senderUsername === username
-                      ? 'own-message'
-                      : 'other-message'
-                    }`}
-                  onContextMenu={(e) => !isSystemMessage(msg) && handleMessageContextMenu(e, msgId, (msg as DecryptedMessage).senderUsername)}
-                  style={{ position: 'relative' }}
-                >
-                  {!isSystemMessage(msg) && (
-                    <div className="message-header">
-                      <span className="message-username">{(msg as DecryptedMessage).senderUsername}</span>
-                      <span className="message-time">{formatTime(msg.timestamp)}</span>
-                    </div>
-                  )}
-                  <div className="message-content">
-                    <div className="message-text">{isSystemMessage(msg) ? msg.text : (msg as DecryptedMessage).text}</div>
-                    {!isSystemMessage(msg) && (msg as MessageWithAttachment).attachment && (
-                      <MessageAttachment
-                        key={(msg as MessageWithAttachment).attachment!.id || (msg as MessageWithAttachment).attachment!.filename}
-                        attachment={(msg as MessageWithAttachment).attachment!}
-                      />
-                    )}
-                    {!isSystemMessage(msg) && (msg as DecryptedMessage).decrypted && (
-                      <span className="encrypted-badge" title="Decrypted successfully">🔓</span>
-                    )}
-                  </div>
-                  
-                  {/* Delete Menu */}
-                  {showDeleteMenu === msgId && (
-                    <div ref={deleteMenuRef} className="delete-menu">
-                      <button 
-                        className="delete-menu-item delete-for-everyone"
-                        onClick={() => handleDeleteForEveryone(msgId)}
-                      >
-                        🗑️ Delete for everyone
-                      </button>
-                      <button 
-                        className="delete-menu-item delete-for-me"
-                        onClick={() => handleDeleteForMe(msgId)}
-                      >
-                        🗑️ Delete for me
-                      </button>
-                      <button 
-                        className="delete-menu-item cancel"
-                        onClick={() => setShowDeleteMenu(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
+                  message={msg as MessageWithAttachment}
+                  isOwn={!isSystemMessage(msg) && (msg as DecryptedMessage).senderUsername === username}
+                  isSystem={isSystemMessage(msg)}
+                  onContextMenu={(e) => {
+                    if (!isSystemMessage(msg) && (msg as DecryptedMessage).senderUsername === username) {
+                      handleMessageContextMenu(e, msgId, (msg as DecryptedMessage).senderUsername);
+                    }
+                  }}
+                />
               );
             })}
-            <div ref={messagesEndRef} />
-
-            {typingUsers.size > 0 && (
-              <div className="typing-indicator">
-                <div className="typing-dots">
-                  <span></span><span></span><span></span>
-                </div>
-                {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
-              </div>
-            )}
-          </div>
-
-          {/* Members Sidebar */}
-          {showMembers && (
-            <div className="members-sidebar" onClick={() => setShowMembers(false)}>
-              <div className="members-panel" onClick={(e) => e.stopPropagation()}>
-                <div className="panel-header">
-                  <h4>Members ({members.length})</h4>
-                  <button className="close-btn" onClick={() => setShowMembers(false)}>×</button>
-                </div>
-                <ul className="members-list">
-                  {members.map((member) => (
-                    <li key={member} className="member-item">
-                      <div className="member-avatar">{member.charAt(0).toUpperCase()}</div>
-                      <div className="member-info">
-                        <span className="member-name">{member}</span>
-                        {member === username && <span className="you-badge">You</span>}
-                      </div>
-                      <span className="member-status-icon" title="Encryption verified">🔐</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <form className="message-input-form" onSubmit={handleSendMessage}>
-          <FileUpload
-            roomId={roomId}
-            onFileUploaded={handleFileUploaded}
-            disabled={uploadingFile}
-            encryptFile={handleEncryptFile}
-          />
-          <div className="input-container">
-            <input
-              type="text"
-              className="input message-input"
-              placeholder="Type an encrypted message..."
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyPress={handleTyping}
-            />
-          </div>
-          <button type="submit" className="btn btn-send" disabled={!inputText.trim()}>
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </form>
+            
+            <AnimatePresence>
+              {typingUsers.size > 0 && (
+                <TypingIndicator users={Array.from(typingUsers)} />
+              )}
+            </AnimatePresence>
+          </>
+        )}
+        <div ref={messagesEndRef} />
       </div>
 
+      {/* Input */}
+      <form onSubmit={handleSendMessage} className="p-2 sm:p-4 border-t border-slate-800/50 bg-slate-950/80 backdrop-blur-xl">
+        <div className="flex items-center gap-2 max-w-4xl mx-auto">
+          <div className="flex-shrink-0">
+            <FileUpload
+              roomId={roomId}
+              onFileUploaded={() => {}}
+              disabled={uploadingFile}
+              encryptFile={async (file) => encryption.encryptFile(file)}
+            />
+          </div>
+          
+          <div className="flex-1 relative min-w-0">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={handleTyping}
+              placeholder="Type a message..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          
+          <Button
+            type="submit"
+            disabled={!inputText.trim()}
+            className="!px-3 sm:!px-4 !py-2 sm:!py-2.5 flex-shrink-0"
+          >
+            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </Button>
+        </div>
+      </form>
+
+      {/* Delete Menu */}
+      <AnimatePresence>
+        {deleteMenu && (
+          <DeleteMenu
+            messageId={deleteMenu.messageId}
+            position={deleteMenu.position}
+            onDeleteForEveryone={() => handleDeleteForEveryone(deleteMenu.messageId)}
+            onDeleteForMe={() => handleDeleteForMe(deleteMenu.messageId)}
+            onCancel={() => setDeleteMenu(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Members Sidebar */}
+      <AnimatePresence>
+        {showMembers && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
+              onClick={() => setShowMembers(false)}
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 w-full sm:w-80 bg-slate-900 border-l border-slate-800 z-50"
+            >
+              <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-800 h-14 sm:h-16">
+                <h2 className="font-semibold text-white text-sm sm:text-base">Members ({members.length})</h2>
+                <IconButton onClick={() => setShowMembers(false)} variant="ghost" className="!w-9 !h-9">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </IconButton>
+              </div>
+              
+              <div className="p-2">
+                {members.map((member) => (
+                  <div key={member} className="flex items-center gap-3 p-2 sm:p-3 rounded-xl hover:bg-slate-800/50 transition-colors">
+                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-semibold text-sm sm:text-base flex-shrink-0">
+                      {member.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">
+                        {member}
+                        {member === username && <span className="ml-2 text-xs text-slate-500">(you)</span>}
+                      </p>
+                    </div>
+                    <svg className="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Room Info Modal */}
+      <AnimatePresence>
+        {showRoomInfo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowRoomInfo(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/50">
+                <h3 className="text-lg font-semibold text-white">Room Information</h3>
+                <IconButton onClick={() => setShowRoomInfo(false)} variant="ghost">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </IconButton>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* Room Code */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Room Code</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 bg-slate-800 px-3 py-2 rounded-lg text-indigo-400 font-mono text-lg tracking-wider">{roomCode}</code>
+                    <Button 
+                      variant="secondary" 
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(roomCode);
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Encryption Details */}
+                <div className="space-y-3">
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider">Encryption Details</label>
+                  
+                  <div className="bg-slate-800/50 rounded-xl p-4 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Algorithm</span>
+                      <span className="text-sm text-white font-medium">AES-256-GCM</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Key Exchange</span>
+                      <span className="text-sm text-white font-medium">ECDH P-256</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-400">Your Fingerprint</span>
+                      <code className="text-xs text-indigo-400 font-mono">{fingerprint}</code>
+                    </div>
+                  </div>
+                </div>
+
+                {/* QR Code */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Join via Mobile</label>
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="bg-white p-2 rounded-lg">
+                      <QRCodeCanvas
+                        value={`${serverUrl || window.location.origin}/?room=${roomCode}`}
+                        size={120}
+                        level="H"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-500 text-center">
+                      Scan this QR code to join the room on your mobile device
+                    </p>
+                  </div>
+                </div>
+
+                {/* Security Note */}
+                <div className="flex items-start gap-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                  <svg className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                  <p className="text-sm text-emerald-400">
+                    Messages and files are encrypted end-to-end. The server cannot read them.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Leave Confirmation Modal */}
-      <ConfirmModal
-        isOpen={showLeaveConfirm}
-        title={isOwner ? "⚠️ Close Room?" : "Leave Room?"}
-        message={isOwner
-          ? "You are the room owner. Leaving will permanently delete:"
-          : "Are you sure you want to leave this room?"
-        }
-        details={isOwner ? [
-          "All chat messages",
-          "All room members",
-          "The entire room"
-        ] : null}
-        onConfirm={handleConfirmLeave}
-        onCancel={handleCancelLeave}
-        confirmText={isOwner ? "Close Room" : "Leave"}
-        cancelText="Cancel"
-        isDanger={isOwner}
-      />
+      <AnimatePresence>
+        {showLeaveConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowLeaveConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isOwner ? 'bg-red-500/20' : 'bg-amber-500/20'}`}>
+                    <svg className={`w-6 h-6 ${isOwner ? 'text-red-400' : 'text-amber-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">{isOwner ? 'Close Room?' : 'Leave Room?'}</h3>
+                  </div>
+                </div>
+                
+                <p className="text-slate-400 mb-4">
+                  {isOwner 
+                    ? 'You are the room owner. Leaving will permanently delete all messages and the room.'
+                    : 'Are you sure you want to leave this room? You can rejoin with the room code.'
+                  }
+                </p>
+
+                {isOwner && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-6">
+                    <p className="text-sm text-red-400">This action cannot be undone. All data will be permanently deleted.</p>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <Button 
+                    variant="secondary" 
+                    fullWidth
+                    onClick={() => setShowLeaveConfirm(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="danger" 
+                    fullWidth
+                    onClick={() => {
+                      setShowLeaveConfirm(false);
+                      onLeave();
+                    }}
+                  >
+                    {isOwner ? 'Close Room' : 'Leave'}
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Blur Overlay */}
-      {isBlurred && (
-        <div className="blur-overlay">
-          <div className="blur-content">
-            <div className="blur-icon">🔒</div>
-            <div className="blur-text">Screen hidden for privacy</div>
-            <div className="blur-subtext">Click anywhere to reveal</div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {isBlurred && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-[9999] flex items-center justify-center"
+            onClick={() => setIsBlurred(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="text-center"
+            >
+              <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-indigo-500/20 flex items-center justify-center">
+                <svg className="w-10 h-10 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-2">Screen Hidden</h2>
+              <p className="text-slate-400">Click anywhere to reveal</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Screenshot Warning Toast */}
-      {screenshotWarning && (
-        <div className="screenshot-warning-toast">
-          <span className="warning-icon">⚠️</span>
-          <span className="warning-text">{screenshotWarning}</span>
-        </div>
-      )}
+      {/* Screenshot Warning */}
+      <AnimatePresence>
+        {screenshotWarning && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000]"
+          >
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span className="font-medium">{screenshotWarning}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Screenshot Watermark - visible on screenshots */}
-      <div className="screenshot-watermark">
-        <div className="watermark-text">{username}</div>
-        <div className="watermark-time">{new Date().toLocaleString()}</div>
+      {/* Screenshot Watermark */}
+      <div className="fixed bottom-20 right-2 text-[10px] text-slate-700 text-right pointer-events-none select-none" style={{ transform: 'rotate(-5deg)', opacity: 0.5 }}>
+        <div>{username}</div>
+        <div>{new Date().toLocaleString()}</div>
       </div>
     </div>
   );

@@ -169,6 +169,8 @@ function createMessageHandler(io, socket, state) {
       timestamp,
       attachment
     };
+    
+    console.log('Server sending message with timestamp:', timestamp, 'Date:', new Date(timestamp).toString());
 
     // Store in database
     db.storeMessage(

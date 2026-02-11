@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import socket, { reconnectWithAuth } from './socket';
 import { RoomEncryption } from './crypto/encryption';
 import authService from './services/authService';
@@ -12,6 +13,8 @@ import RoomPage from './pages/RoomPage';
 // Components
 import JoinRequestModal from './components/JoinRequestModal';
 import Toast from './components/Toast';
+import { Logo } from './components/Logo';
+import { Button } from './components/Button';
 
 import './styles/app.css';
 
@@ -41,6 +44,7 @@ function App(): JSX.Element {
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [toast, setToast] = useState<{ message: string; type: ToastProps['type'] } | null>(null);
   const [encryptionStatus, setEncryptionStatus] = useState<EncryptionStatus>('initializing');
+  const [joinDenied, setJoinDenied] = useState<boolean>(false);
 
   // Refs
   const encryptionRef = useRef<RoomEncryption | null>(null);
@@ -52,7 +56,6 @@ function App(): JSX.Element {
     const roomParam = params.get('room');
     if (roomParam) {
       pendingRoomCodeRef.current = roomParam;
-      // Auto-switch to legacy mode for QR code joins (mobile users)
       if (!authService.isAuthenticated()) {
         setUseNewAuth(false);
       }
@@ -88,7 +91,6 @@ function App(): JSX.Element {
         setCurrentPage('home');
         reconnectWithAuth();
 
-        // Register with socket after reconnection
         const registerOnConnect = () => {
           if (encryptionRef.current && encryptionRef.current.publicKeyExported) {
             socket.emit('register', {
@@ -99,7 +101,6 @@ function App(): JSX.Element {
           socket.off('connect', registerOnConnect);
         };
 
-        // Wait for both socket connection and encryption to be ready
         const tryRegister = () => {
           if (socket.connected && encryptionRef.current?.publicKeyExported) {
             socket.emit('register', {
@@ -111,7 +112,6 @@ function App(): JSX.Element {
           }
         };
 
-        // Small delay to ensure encryption is ready
         setTimeout(tryRegister, 500);
       }
     } else if (useNewAuth) {
@@ -121,10 +121,9 @@ function App(): JSX.Element {
     }
   }, [useNewAuth]);
 
-  // Handle socket connection/reconnection - always re-register
+  // Handle socket connection/reconnection
   useEffect(() => {
     const handleConnect = () => {
-      // Only register if we have a username and encryption is ready
       const user = authService.getUser();
       const currentUsername = user?.username || username;
 
@@ -138,7 +137,6 @@ function App(): JSX.Element {
 
     socket.on('connect', handleConnect);
 
-    // If already connected, register now
     if (socket.connected && username && encryptionRef.current?.publicKeyExported) {
       handleConnect();
     }
@@ -153,7 +151,7 @@ function App(): JSX.Element {
     socket.on('registered', ({ username: acceptedUsername }: { username: string }) => {
       setUsername(acceptedUsername);
       setCurrentPage('home');
-      showToast('🔐 Secure session started', 'success');
+      showToast('Secure session started', 'success');
 
       if (pendingRoomCodeRef.current) {
         handleJoinRoom(pendingRoomCodeRef.current);
@@ -177,13 +175,11 @@ function App(): JSX.Element {
           roomType: roomType || 'legacy'
         });
         setCurrentPage('room');
-        const typeLabel = roomType === 'authenticated' ? ' (Authenticated)' : ' (Legacy)';
-        showToast(`Room ${roomCode} created${typeLabel}`, 'success');
+        showToast(`Room ${roomCode} created`, 'success');
       }
     });
 
     socket.on('join-request', ({ requestId, username: requesterName, publicKey, roomId }: JoinRequest & { roomId: string }) => {
-      console.log('[DEBUG frontend] Received join-request:', { requestId, requesterName, roomId });
       setJoinRequests(prev => [...prev, { requestId, username: requesterName, publicKey, roomId }]);
       showToast(`${requesterName} wants to join`, 'info');
     });
@@ -194,13 +190,13 @@ function App(): JSX.Element {
 
         setCurrentRoom({ roomId, roomCode, isOwner: false, memberKeys, roomType: roomType || 'legacy' });
         setCurrentPage('room');
-        const typeLabel = roomType === 'authenticated' ? ' (Authenticated)' : '';
-        showToast(`🔐 Joined secure room${typeLabel}`, 'success');
+        showToast('Joined secure room', 'success');
       }
     });
 
     socket.on('join-denied', () => {
       showToast('Join request denied', 'error');
+      setJoinDenied(true);
     });
 
     socket.on('error', ({ message }: { message: string }) => {
@@ -231,7 +227,6 @@ function App(): JSX.Element {
     setIsAuthenticated(true);
     reconnectWithAuth();
 
-    // Wait for socket to reconnect before registering
     const registerAfterConnect = () => {
       if (encryptionStatus === 'ready' && encryptionRef.current && encryptionRef.current.publicKeyExported) {
         socket.emit('register', {
@@ -277,6 +272,7 @@ function App(): JSX.Element {
   };
 
   const handleJoinRoom = (roomCode: string): void => {
+    setJoinDenied(false); // Reset denied state for new request
     socket.emit('request-join', { roomCode: roomCode.toUpperCase() });
     showToast('Join request sent...', 'info');
   };
@@ -311,89 +307,129 @@ function App(): JSX.Element {
     setTimeout(() => setToast(null), 3500);
   };
 
-  // Toggle auth mode
   const toggleAuthMode = (): void => {
     setUseNewAuth(!useNewAuth);
     setCurrentPage(useNewAuth ? 'username' : 'auth');
   };
 
-  return (
-    <div className="app">
-      <div className="encryption-indicator">
-        <div className={`indicator-dot ${encryptionStatus}`}></div>
-        <span>{encryptionStatus === 'ready' ? 'E2E Encrypted' : 'Initializing...'}</span>
-        {isAuthenticated && (
-          <button className="logout-btn" onClick={handleLogout} title="Logout">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-              <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  // Encryption Error Screen
+  if (encryptionStatus === 'error') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="max-w-md w-full text-center">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-red-500/10 flex items-center justify-center">
+            <svg className="w-10 h-10 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
-          </button>
-        )}
-      </div>
-
-      {encryptionStatus === 'error' && (
-        <div style={{
-          position: 'fixed', inset: 0, background: '#0a0b1e', color: 'white',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          padding: '2rem', zIndex: 9999, textAlign: 'center'
-        }}>
-          <h2 style={{ color: '#ff4b4b', marginBottom: '1rem' }}>⚠️ Security Feature Restricted</h2>
-          <p style={{ maxWidth: '600px', lineHeight: '1.6', marginBottom: '2rem', color: '#a0a0b0' }}>
-            This app uses <strong>Web Crypto API</strong> for end-to-end encryption.
-            Modern browsers block this API on &quot;insecure&quot; connections.
+          </div>
+          <h1 className="text-2xl font-bold text-white mb-4">Security Feature Restricted</h1>
+          <p className="text-slate-400 mb-6">
+            This app uses Web Crypto API for end-to-end encryption. Modern browsers block this API on insecure connections.
           </p>
-          <div style={{ background: '#1a1b2e', padding: '1.5rem', borderRadius: '12px', textAlign: 'left', maxWidth: '600px', width: '100%' }}>
-            <h3 style={{ color: '#00d4aa', marginBottom: '1rem' }}>How to fix (Chrome/Edge/Brave):</h3>
-            <ol style={{ paddingLeft: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
-              <li>Open: <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px' }}>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code></li>
+          <div className="bg-slate-900 rounded-xl p-4 text-left mb-6">
+            <h3 className="text-sm font-semibold text-indigo-400 mb-3">How to fix (Chrome/Edge/Brave):</h3>
+            <ol className="text-sm text-slate-400 space-y-2 list-decimal list-inside">
+              <li>Open: <code className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code></li>
               <li>Enable the flag</li>
-              <li>Add: <code style={{ color: '#00d4aa' }}>{window.location.origin}</code></li>
+              <li>Add: <code className="text-indigo-400">{window.location.origin}</code></li>
               <li>Relaunch browser</li>
             </ol>
           </div>
-          <button onClick={() => window.location.reload()} style={{ marginTop: '2rem', padding: '12px 24px', background: '#00d4aa', border: 'none', borderRadius: '8px', color: '#000', fontWeight: 'bold', cursor: 'pointer' }}>
+          <Button onClick={() => window.location.reload()} fullWidth>
             Reload App
-          </button>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      {/* Encryption Status Indicator - Hidden on room page */}
+      {currentPage !== 'room' && (
+        <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur border border-slate-800">
+          <span className={`w-2 h-2 rounded-full ${encryptionStatus === 'ready' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+          <span className="text-xs font-medium text-slate-400">
+            {encryptionStatus === 'ready' ? 'Encrypted' : 'Initializing...'}
+          </span>
+          {isAuthenticated && (
+            <button 
+              onClick={handleLogout}
+              className="ml-2 p-1 hover:bg-slate-800 rounded-lg transition-colors"
+              title="Logout"
+            >
+              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          )}
         </div>
       )}
 
-      {currentPage === 'auth' && useNewAuth && (
-        <AuthPage
-          onAuth={handleAuth}
-          encryptionReady={encryptionStatus === 'ready'}
-        />
-      )}
+      {/* Main Content */}
+      <AnimatePresence mode="wait">
+        {currentPage === 'auth' && useNewAuth && (
+          <motion.div
+            key="auth"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <AuthPage onAuth={handleAuth} encryptionReady={encryptionStatus === 'ready'} />
+          </motion.div>
+        )}
 
-      {currentPage === 'username' && !useNewAuth && (
-        <UsernamePage
-          onRegister={handleRegister}
-          encryptionReady={encryptionStatus === 'ready'}
-        />
-      )}
+        {currentPage === 'username' && !useNewAuth && (
+          <motion.div
+            key="username"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <UsernamePage onRegister={handleRegister} encryptionReady={encryptionStatus === 'ready'} />
+          </motion.div>
+        )}
 
-      {currentPage === 'home' && (
-        <HomePage
-          username={username}
-          onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-        />
-      )}
+        {currentPage === 'home' && (
+          <motion.div
+            key="home"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <HomePage
+              username={username}
+              onCreateRoom={handleCreateRoom}
+              onJoinRoom={handleJoinRoom}
+              joinDenied={joinDenied}
+              onJoinDeniedAck={() => setJoinDenied(false)}
+            />
+          </motion.div>
+        )}
 
-      {currentPage === 'room' && currentRoom && encryptionRef.current && (
-        <RoomPage
-          roomId={currentRoom.roomId}
-          roomCode={currentRoom.roomCode}
-          username={username}
-          isOwner={currentRoom.isOwner}
-          encryption={encryptionRef.current}
-          onUpdateRoomKey={handleUpdateRoomKey}
-          onLeave={handleLeaveRoom}
-          roomType={currentRoom.roomType}
-        />
-      )}
+        {currentPage === 'room' && currentRoom && encryptionRef.current && (
+          <motion.div
+            key="room"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="h-screen"
+          >
+            <RoomPage
+              roomId={currentRoom.roomId}
+              roomCode={currentRoom.roomCode}
+              username={username}
+              isOwner={currentRoom.isOwner}
+              encryption={encryptionRef.current}
+              onUpdateRoomKey={handleUpdateRoomKey}
+              onLeave={handleLeaveRoom}
+              roomType={currentRoom.roomType}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
+      {/* Join Request Modal */}
       {joinRequests.length > 0 && (
         <JoinRequestModal
           requests={joinRequests}
@@ -402,24 +438,24 @@ function App(): JSX.Element {
         />
       )}
 
-      {toast && <Toast message={toast.message} type={toast.type} />}
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, x: 20 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, y: 20, x: 20 }}
+          >
+            <Toast message={toast.message} type={toast.type} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Dev toggle for auth mode */}
       {(currentPage === 'auth' || currentPage === 'username') && (
         <button
           onClick={toggleAuthMode}
-          style={{
-            position: 'fixed',
-            bottom: '20px',
-            right: '20px',
-            padding: '8px 16px',
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: '8px',
-            color: '#888',
-            fontSize: '12px',
-            cursor: 'pointer'
-          }}
+          className="fixed bottom-4 right-4 px-3 py-1.5 text-xs text-slate-600 hover:text-slate-400 bg-slate-900/50 hover:bg-slate-800/50 rounded-lg border border-slate-800 transition-colors"
         >
           {useNewAuth ? 'Use Legacy Mode' : 'Use Auth Mode'}
         </button>

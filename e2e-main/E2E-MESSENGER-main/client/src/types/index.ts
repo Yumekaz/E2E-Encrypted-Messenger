@@ -226,6 +226,8 @@ export interface HomePageProps {
   username: string;
   onCreateRoom: () => void;
   onJoinRoom: (roomCode: string) => void;
+  joinDenied?: boolean;
+  onJoinDeniedAck?: () => void;
 }
 
 export interface RoomPageProps {

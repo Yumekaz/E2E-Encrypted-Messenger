@@ -283,13 +283,30 @@ function createRoomHandler(io, socket, state) {
 
     // Get messages from database
     const dbMessages = db.getRoomMessages(roomId);
+    console.log('Server loading messages from DB, count:', dbMessages.length);
+    if (dbMessages.length > 0) {
+      console.log('First message created_at:', dbMessages[0].created_at, 'type:', typeof dbMessages[0].created_at);
+    }
+    
     const encryptedMessages = dbMessages.map(msg => {
+      // Parse SQLite datetime - it's stored as local time string 'YYYY-MM-DD HH:MM:SS'
+      const createdAt = msg.created_at;
+      let timestamp;
+      if (typeof createdAt === 'string') {
+        // Parse as local time by replacing space with T (no Z suffix)
+        timestamp = new Date(createdAt.replace(' ', 'T')).getTime();
+      } else {
+        timestamp = new Date(createdAt).getTime();
+      }
+      
+      console.log('DB created_at:', createdAt, '-> timestamp:', timestamp, '-> Date:', new Date(timestamp).toString());
+      
       const message = {
         id: msg.message_id,
         senderUsername: msg.sender_username,
         encryptedData: msg.encrypted_data,
         iv: msg.iv,
-        timestamp: new Date(msg.created_at).getTime(),
+        timestamp: timestamp,
       };
 
       if (msg.attachment_id) {
