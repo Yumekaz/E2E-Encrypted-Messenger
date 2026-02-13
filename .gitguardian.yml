@@ -1,0 +1,33 @@
+# GitGuardian configuration file
+# This file configures which files/paths should be ignored by GitGuardian
+
+version: 2
+
+# Ignore test files - these contain intentionally hardcoded test credentials
+# that are only used in local test environments and pose no security risk
+ignores:
+  - path: tests/**
+    reason: "Test files with intentionally hardcoded test credentials"
+  - path: e2e/**
+    reason: "E2E test files with intentionally hardcoded test credentials"
+  - path: "**/*.test.js"
+    reason: "Test files with test credentials"
+  - path: "**/*.spec.ts"
+    reason: "E2E test files with test credentials"
+  - path: "**/jest.config.js"
+    reason: "Jest configuration"
+  - path: "**/playwright.config.ts"
+    reason: "Playwright configuration"
+
+# Ignore specific patterns that are test-only
+matches:
+  - pattern: "jest-local-jwt-secret"
+    reason: "Local test-only JWT secret, never used in production"
+  - pattern: "jest-local-refresh-secret"
+    reason: "Local test-only refresh secret, never used in production"
+  - pattern: "TestPassword123"
+    reason: "Test-only password used in automated tests"
+  - pattern: "SecurePass123"
+    reason: "Test-only password used in automated tests"
+  - pattern: "TestPass123"
+    reason: "Test-only password used in automated tests"
