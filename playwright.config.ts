@@ -61,7 +61,8 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
     env: {
-      JWT_SECRET: 'e2e-test-secret-key',
+      JWT_SECRET: process.env.JWT_SECRET || 'jest-local-jwt-secret',
+      JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || 'jest-local-refresh-secret',
       NODE_ENV: 'test',
     },
   },
