@@ -5,7 +5,7 @@ A production-ready, real-time messaging application with **true end-to-end encry
 ![Version](https://img.shields.io/badge/version-3.0.0-blue)
 ![Encryption](https://img.shields.io/badge/Encryption-AES--256--GCM-00d4aa)
 ![Auth](https://img.shields.io/badge/Auth-JWT%20%2B%20bcrypt-green)
-![Tests](https://img.shields.io/badge/Tests-95%20Passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-220%2B%20Tests-brightgreen)
 ![Storage](https://img.shields.io/badge/Storage-SQLite-blue)
 
 ---
@@ -40,7 +40,7 @@ A production-ready, real-time messaging application with **true end-to-end encry
 
 ### 🛠️ Developer Experience
 - **TypeScript** - Full type safety on frontend
-- **Comprehensive Testing** - 95+ Unit (Jest) and E2E (Playwright) tests
+- **Comprehensive Testing** - 220+ Unit (Jest) and E2E (Playwright) tests with ~85% coverage
 - **Dual Server Modes** - Enhanced (Auth) and Legacy (Simple) servers
 - **CI Pipeline** - GitHub Actions workflow for install, build, and tests
 
@@ -112,9 +112,13 @@ npm run test:all
 ```
 
 **Coverage:**
-- ✅ **Auth:** Registration, Login, Token Refresh, Rate Limiting
-- ✅ **Rooms:** Creation, Joining, Locking, Persistence
-- ✅ **Security:** Injection, XSS prevention, Error handling
+- ✅ **Auth:** Registration, Login, Token Refresh, Rate Limiting, Edge Cases
+- ✅ **Rooms:** Creation, Joining, Locking, Persistence, Permissions
+- ✅ **Messages:** Read Receipts, Deletion, Screenshot Detection
+- ✅ **Files:** Upload, Download, Signed URLs, Integrity Checks
+- ✅ **Sockets:** Real-time Events, Reconnection, Race Conditions
+- ✅ **Security:** Injection, XSS prevention, Error handling, URL Signing
+- ✅ **Utilities:** Logger, URL Signer, File Integrity, Validators
 - ✅ **E2E:** Full user flows (Login → Create Room → Chat → Leave)
 
 ---
