@@ -6,6 +6,7 @@
 const request = require('supertest');
 const path = require('path');
 const fs = require('fs');
+const urlSigner = require('../backend/utils/urlSigner');
 
 const API_URL = () => global.__TEST_API_URL__;
 
@@ -47,11 +48,10 @@ describe('File Download API', () => {
       .post('/api/files/upload')
       .set('Authorization', `Bearer ${accessToken}`)
       .field('roomId', roomId)
-      .attach('file', testFilePath);
+      .attach('file', testFilePath)
+      .expect(201);
 
-    if (uploadRes.status === 201) {
-      uploadedFileId = uploadRes.body.attachment.id;
-    }
+    uploadedFileId = uploadRes.body.attachment.id;
   });
 
   afterAll(() => {
@@ -64,8 +64,14 @@ describe('File Download API', () => {
     it('should download file with valid auth', async () => {
       if (!uploadedFileId) return;
 
+      const urlRes = await request(API_URL())
+        .get(`/api/files/${uploadedFileId}/url`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const signedUrl = urlRes.body.attachment.url;
       const res = await request(API_URL())
-        .get(`/api/files/${uploadedFileId}`)
+        .get(signedUrl)
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
@@ -75,16 +81,28 @@ describe('File Download API', () => {
     it('should reject download without auth', async () => {
       if (!uploadedFileId) return;
 
+      const urlRes = await request(API_URL())
+        .get(`/api/files/${uploadedFileId}/url`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const signedUrl = urlRes.body.attachment.url;
       await request(API_URL())
-        .get(`/api/files/${uploadedFileId}`)
+        .get(signedUrl)
         .expect(401);
     });
 
     it('should reject download with invalid token', async () => {
       if (!uploadedFileId) return;
 
+      const urlRes = await request(API_URL())
+        .get(`/api/files/${uploadedFileId}/url`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const signedUrl = urlRes.body.attachment.url;
       await request(API_URL())
-        .get(`/api/files/${uploadedFileId}`)
+        .get(signedUrl)
         .set('Authorization', 'Bearer invalid.token.here')
         .expect(401);
     });
@@ -118,8 +136,14 @@ describe('File Download API', () => {
     it('should include correct content-type header', async () => {
       if (!uploadedFileId) return;
 
+      const urlRes = await request(API_URL())
+        .get(`/api/files/${uploadedFileId}/url`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const signedUrl = urlRes.body.attachment.url;
       const res = await request(API_URL())
-        .get(`/api/files/${uploadedFileId}`)
+        .get(signedUrl)
         .set('Authorization', `Bearer ${accessToken}`);
 
       expect(res.status).toBe(200);
@@ -129,8 +153,14 @@ describe('File Download API', () => {
     it('should include content-disposition header', async () => {
       if (!uploadedFileId) return;
 
+      const urlRes = await request(API_URL())
+        .get(`/api/files/${uploadedFileId}/url`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const signedUrl = urlRes.body.attachment.url;
       const res = await request(API_URL())
-        .get(`/api/files/${uploadedFileId}`)
+        .get(signedUrl)
         .set('Authorization', `Bearer ${accessToken}`);
 
       expect(res.status).toBe(200);
@@ -147,9 +177,11 @@ describe('File Download API', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body).toHaveProperty('url');
-      expect(res.body).toHaveProperty('expiresAt');
-      expect(res.body.url).toContain('/api/files/');
+      expect(res.body).toHaveProperty('attachment');
+      expect(res.body.attachment).toHaveProperty('url');
+      expect(res.body.attachment.url).toContain('/api/files/');
+      expect(res.body.attachment.url).toContain('sig=');
+      expect(res.body.attachment.url).toContain('exp=');
     });
 
     it('should reject URL refresh without auth', async () => {
@@ -197,7 +229,7 @@ describe('File Download API', () => {
           .set('Authorization', `Bearer ${accessToken}`)
           .expect(200);
         
-        urls.push(res.body.url);
+        urls.push(res.body.attachment.url);
       }
 
       // URLs should be different (different signatures/timestamps)
@@ -213,8 +245,10 @@ describe('File Download API', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      expect(res.body.expiresAt).toBeDefined();
-      const expiresAt = new Date(res.body.expiresAt).getTime();
+      const signedUrl = res.body.attachment.url;
+      const match = signedUrl.match(/exp=(\d+)/);
+      expect(match).toBeTruthy();
+      const expiresAt = parseInt(match[1], 10) * 1000;
       const now = Date.now();
       
       // Should expire in the future
@@ -234,20 +268,27 @@ describe('File Download API', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      const signedUrl = urlRes.body.url;
+      const signedUrl = urlRes.body.attachment.url;
 
-      // Download using signed URL (no auth needed)
+      // Download using signed URL (auth still required)
       const downloadRes = await request(API_URL())
-        .get(signedUrl.replace(/^.*\/api\//, '/api/'));
+        .get(signedUrl)
+        .set('Authorization', `Bearer ${accessToken}`);
 
       expect(downloadRes.status).toBe(200);
       expect(downloadRes.body.toString()).toBe('Test content for download');
     });
 
     it('should reject expired signed URL', async () => {
-      // This test would require manipulating time or using a known expired URL
-      // For now, just verify the endpoint exists
-      expect(true).toBe(true);
+      if (!uploadedFileId) return;
+
+      const expiredUrl = urlSigner.sign(`/api/files/${uploadedFileId}`, -5);
+
+      const res = await request(API_URL())
+        .get(expiredUrl)
+        .set('Authorization', `Bearer ${accessToken}`);
+
+      expect(res.status).toBe(403);
     });
 
     it('should reject tampered signed URL', async () => {
@@ -259,14 +300,15 @@ describe('File Download API', () => {
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(200);
 
-      const signedUrl = urlRes.body.url;
+      const signedUrl = urlRes.body.attachment.url;
       
       // Tamper with the signature
-      const tamperedUrl = signedUrl.replace(/signature=[^&]*/, 'signature=tampered');
+      const tamperedUrl = signedUrl.replace(/sig=[^&]*/, 'sig=tampered');
 
       // Try to download with tampered URL
       const downloadRes = await request(API_URL())
-        .get(tamperedUrl.replace(/^.*\/api\//, '/api/'));
+        .get(tamperedUrl)
+        .set('Authorization', `Bearer ${accessToken}`);
 
       expect(downloadRes.status).toBe(403);
     });

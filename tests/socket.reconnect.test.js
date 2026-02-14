@@ -400,7 +400,7 @@ describe('Socket Reconnection Tests', () => {
         })
         .expect(201);
 
-      userA = { token: regRes.body.accessToken, username: regA.body.user.username };
+      userA = { token: regRes.body.accessToken, username: regRes.body.user.username };
 
       // Connect with invalid token
       socketA = io(API_URL(), { 

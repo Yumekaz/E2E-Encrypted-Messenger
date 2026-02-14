@@ -16,6 +16,7 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret
       URL_SIGNING_SECRET: ci-url-signing-secret
       NODE_ENV: test
+      PORT: 3000
     steps:
       - name: Checkout
         uses: actions/checkout@v4

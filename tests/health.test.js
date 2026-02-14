@@ -111,18 +111,9 @@ describe('Rate Limiting', () => {
     const res = await request(API_URL())
       .get('/api/health');
 
-    // These headers should be present when rate limiting is enabled
-    const hasRateLimitHeaders = 
-      res.headers['x-ratelimit-limit'] !== undefined ||
-      res.headers['x-ratelimit-remaining'] !== undefined;
-
-    // Rate limiting might not affect health endpoint, but check auth endpoints
-    const authRes = await request(API_URL())
-      .post('/api/auth/login')
-      .send({ email: 'test@test.com', password: 'wrong' });
-
-    // Either rate limit headers exist or the status indicates rate limiting logic
-    expect(authRes.status).toBeDefined();
+    expect(res.headers['x-ratelimit-limit']).toBeDefined();
+    expect(res.headers['x-ratelimit-remaining']).toBeDefined();
+    expect(res.headers['x-ratelimit-reset']).toBeDefined();
   });
 
   it('should rate limit auth endpoints after many attempts', async () => {

@@ -106,7 +106,7 @@ describe('File Upload Edge Cases', () => {
           .field('roomId', roomId)
           .attach('file', filePath);
 
-        expect([201, 400]).toContain(res.status);
+        expect(res.status).toBe(201);
 
         fs.unlinkSync(filePath);
       }
@@ -146,7 +146,7 @@ describe('File Upload Edge Cases', () => {
   });
 
   describe('File Size Edge Cases', () => {
-    it('should reject empty files', async () => {
+    it('should allow empty files', async () => {
       const emptyPath = path.join(testFileDir, 'empty.txt');
       fs.writeFileSync(emptyPath, '');
 
@@ -156,7 +156,7 @@ describe('File Upload Edge Cases', () => {
         .field('roomId', roomId)
         .attach('file', emptyPath);
 
-      expect([400, 201]).toContain(res.status);
+      expect(res.status).toBe(201);
     });
 
     it('should reject files exceeding size limit', async () => {
@@ -171,7 +171,7 @@ describe('File Upload Edge Cases', () => {
         .field('roomId', roomId)
         .attach('file', largePath);
 
-      expect(res.status).toBe(413); // Payload Too Large
+      expect(res.status).toBe(400); // FILE_TOO_LARGE
 
       fs.unlinkSync(largePath);
     });
@@ -187,8 +187,7 @@ describe('File Upload Edge Cases', () => {
         .field('roomId', roomId)
         .attach('file', nearLimitPath);
 
-      // Should either accept or have specific error
-      expect([201, 413]).toContain(res.status);
+      expect(res.status).toBe(201);
 
       fs.unlinkSync(nearLimitPath);
     });
@@ -206,8 +205,7 @@ describe('File Upload Edge Cases', () => {
         .field('roomId', roomId)
         .attach('file', longPath);
 
-      // Should either accept or reject gracefully
-      expect([201, 400]).toContain(res.status);
+      expect(res.status).toBe(201);
     });
 
     it('should handle filenames with special characters', async () => {
@@ -230,7 +228,7 @@ describe('File Upload Edge Cases', () => {
           .field('roomId', roomId)
           .attach('file', filePath);
 
-        expect([201, 400]).toContain(res.status);
+        expect(res.status).toBe(201);
 
         fs.unlinkSync(filePath);
       }
@@ -259,7 +257,7 @@ describe('File Upload Edge Cases', () => {
           .field('roomId', roomId)
           .attach('file', filePath);
 
-        expect([201, 400]).toContain(res.status);
+        expect(res.status).toBe(201);
 
         try {
           fs.unlinkSync(filePath);
@@ -287,8 +285,7 @@ describe('File Upload Edge Cases', () => {
           .field('roomId', roomId)
           .attach('file', filePath);
 
-        // Should sanitize or reject
-        expect([201, 400]).toContain(res.status);
+        expect(res.status).toBe(201);
 
         fs.unlinkSync(filePath);
       }
@@ -318,7 +315,7 @@ describe('File Upload Edge Cases', () => {
         .field('roomId', 'non-existent-room')
         .attach('file', filePath);
 
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(403);
     });
 
     it('should reject upload to room user is not member of', async () => {
@@ -372,8 +369,7 @@ describe('File Upload Edge Cases', () => {
         .attach('file', file1Path)
         .attach('file', file2Path);
 
-      // Should either accept first or reject
-      expect([201, 400]).toContain(res.status);
+      expect(res.status).toBe(400);
     });
   });
 
